@@ -254,11 +254,26 @@ class ExcelReport:
             for sap_code, tests in grouped_data.items():
                 self._create_collaudo_nominale_sheet(openpyxl_wb, sap_code, tests, loader)
             
-            # Save the modified workbook
-            openpyxl_wb.save(self.output_path)
-            openpyxl_wb.close()
-            
-            self.logger.info("Successfully created COLLAUDO NOMINALE sheets")
+            # Save the modified workbook to a new file to avoid corrupting charts
+            try:
+                postprocessed_path = self.output_path.with_name(self.output_path.stem + "_with_raw" + self.output_path.suffix)
+                openpyxl_wb.save(postprocessed_path)
+                openpyxl_wb.close()
+
+                self.logger.info(
+                    "Successfully created COLLAUDO NOMINALE sheets; saved post-processed workbook to %s",
+                    postprocessed_path,
+                )
+                self.logger.info("Original workbook with charts preserved at %s", self.output_path)
+            except Exception as e:
+                # If saving to alternate path fails, attempt to save to original path as a last resort
+                try:
+                    self.logger.warning("Failed to save post-processed workbook to alternate path: %s. Attempting to save to original path.", e)
+                    openpyxl_wb.save(self.output_path)
+                    openpyxl_wb.close()
+                    self.logger.info("Saved post-processed workbook to original path %s (may overwrite charts)", self.output_path)
+                except Exception as e2:
+                    self.logger.error("Failed to save post-processed workbook: %s", e2, exc_info=True)
             
         except Exception as e:
             self.logger.error(f"Failed to create COLLAUDO NOMINALE sheets: {e}", exc_info=True)

@@ -53,7 +53,7 @@ if str(project_root) not in sys.path:
 
 # Bootstrap runtime environment (handles PyInstaller, paths, stdio)
 try:
-    from .config.runtime import log_runtime_info, is_bundled
+    from src.config.runtime import log_runtime_info, is_bundled
 except ImportError as e:
     logger.critical(f"Failed to import runtime module: {e}")
     sys.exit(1)
@@ -64,7 +64,7 @@ log_runtime_info()
 # Initialize directories at runtime (not at import time during build)
 try:
     logger.info("Initializing data directories at runtime...")
-    from .config.directory_config import ensure_directories_initialized
+    from src.config.directory_config import ensure_directories_initialized
     ensure_directories_initialized()
     logger.info("Data directories initialized successfully")
 except Exception as e:
@@ -76,7 +76,7 @@ except Exception as e:
 # Import the GUI module
 try:
     logger.info("Importing MotorReportAppGUI...")
-    from .ui.main_gui import MotorReportAppGUI
+    from src.ui.main_gui import MotorReportAppGUI
     logger.info("MotorReportAppGUI import complete")
 except ImportError as e:
     logger.exception(f"Unable to import MotorReportAppGUI: {e}")

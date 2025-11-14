@@ -2,7 +2,6 @@ import logging
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
 from xlsxwriter.workbook import Workbook as XlsxWorkbook
-from xlsxwriter.utility import xl_col_to_name
 
 from ...config.app_config import AppConfig
 from ...data.models import MotorTestData
@@ -215,43 +214,17 @@ class ComparisonSheetBuilder:
         # Same calculation as performance sheet: 22 * 2 + 2 = 46
         return charts_start_row + 46
 
-
-
     def _create_comparison_chart(self, start_row: int, start_col: int, title: str,
                                  x_col_name: str, x_axis_title: str, y_axis_title: str,
                                  y_col_name: str) -> int:
         """Create a comparison chart using worksheet data ranges for selected test labs."""
         try:
-            chart = self.workbook.add_chart({'type': 'scatter', 'subtype': 'smooth'})
+            # Create chart using helper
+            chart = self.helper.create_chart(title, x_axis_title, y_axis_title)
             if not chart:
                 self.logger.error(f"Failed to create chart: {title}")
                 self.worksheet.write(start_row, start_col, f"{title} chart error: Could not create chart object.", self.formatter.get('cell'))
                 return start_row + 2
-
-            chart.set_title({'name': title, 'name_font': {'size': 12, 'bold': True}})
-            chart.set_x_axis({
-                'name': x_axis_title, 
-                'name_font': {'size': 10, 'bold': True},
-                'num_font': {'size': 9},
-                'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
-            })
-            chart.set_y_axis({
-                'name': y_axis_title, 
-                'name_font': {'size': 10, 'bold': True},
-                'num_font': {'size': 9},
-                'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
-            })
-            chart.set_size({'width': 680, 'height': 400})
-            chart.set_legend({'position': 'bottom'})
-            chart.set_plotarea({
-                'border': {'color': '#D9D9D9', 'width': 1},
-                'layout': {
-                    'x': 0.12,
-                    'y': 0.1,
-                    'width': 0.85,
-                    'height': 0.65,
-                }
-            })
 
             colors = ['#4472C4', '#ED7D31', '#A5A5A5', '#FFC000', '#5B9BD5', '#70AD47']
             series_added = 0
@@ -278,25 +251,34 @@ class ComparisonSheetBuilder:
                     series_name = f"SAP {data_range['sap_code']} - Test {data_range['test_number']}"
                     color = colors[series_added % len(colors)]
                     
-                    # Define data ranges for this test using Excel references
+                    # Define data ranges for this test using Excel references (zero-based indices)
                     # Use automatic range that adjusts to actual data size
                     start_data_row = data_range['start_row']
                     end_data_row = start_data_row + data_range['num_rows'] - 1
-                    
-                    # Automatic range: =Sheet!$A$2:$A$100 becomes dynamic based on actual data
-                    x_values = f"='{self.sheet_name}'!${xl_col_to_name(x_col_idx)}${start_data_row + 1}:${xl_col_to_name(x_col_idx)}${end_data_row + 1}"
-                    y_values = f"='{self.sheet_name}'!${xl_col_to_name(y_col_idx)}${start_data_row + 1}:${xl_col_to_name(y_col_idx)}${end_data_row + 1}"
-                    
+
+                    # xlsxwriter expects list-format ranges to be zero-based indices:
+                    # [sheet_name, first_row, first_col, last_row, last_col]
+                    x_values = [self.sheet_name, start_data_row, x_col_idx, end_data_row, x_col_idx]
+                    y_values = [self.sheet_name, start_data_row, y_col_idx, end_data_row, y_col_idx]
+                    # Log both the internal list-format ranges and a human-friendly A1-style range
+                    try:
+                        a1_x = self._range_list_to_a1(x_values)
+                        a1_y = self._range_list_to_a1(y_values)
+                    except Exception:
+                        a1_x = None
+                        a1_y = None
+
+                    self.logger.info(f"Adding chart series '{series_name}' -> X(list)={x_values}, X(A1)={a1_x}; Y(list)={y_values}, Y(A1)={a1_y}")
                     self.logger.debug(f"Chart series '{series_name}': X={x_values}, Y={y_values}")
                     
-                    # Add series to chart
-                    chart.add_series({
-                        'name': series_name,
-                        'categories': x_values,
-                        'values': y_values,
-                        'marker': {'type': 'circle', 'size': 5, 'fill': {'color': color}, 'border': {'color': color}},
-                        'line': {'color': color, 'width': 2}
-                    })
+                    # Add series to chart using helper
+                    self.helper.add_chart_series(
+                        chart=chart,
+                        series_name=series_name,
+                        x_range=x_values,
+                        y_range=y_values,
+                        color=color
+                    )
                     series_added += 1
                     self.logger.debug(f"Successfully added series {series_added} for {series_name}")
                     
@@ -305,7 +287,8 @@ class ComparisonSheetBuilder:
                     continue
 
             if series_added > 0:
-                self.worksheet.insert_chart(start_row, start_col, chart)
+                # Insert chart using helper
+                self.helper.insert_chart_with_size(chart, start_row, start_col)
                 self.logger.info(f"Created comparison chart '{title}' with {series_added} data series")
             else:
                 self.logger.warning(f"No data series added to {title} chart")
@@ -762,3 +745,36 @@ class ComparisonSheetBuilder:
         
         log_method = getattr(self.logger, level, self.logger.info)
         log_method(message)
+
+    def _col_idx_to_excel(self, idx: int) -> str:
+        """Convert zero-based column index to Excel column letters (e.g. 0 -> 'A', 27 -> 'AB')."""
+        # Simpler robust approach: convert using 1-based math
+        n = idx + 1
+        letters = ''
+        while n > 0:
+            n, remainder = divmod(n-1, 26)
+            letters = chr(65 + remainder) + letters
+        return letters
+
+    def _range_list_to_a1(self, range_list: List) -> Optional[str]:
+        """Convert xlsxwriter list-format range to A1 string with sheet name.
+
+        Expects: [sheet_name, first_row, first_col, last_row, last_col] with zero-based indices.
+        Returns string like "Sheet1!$A$1:$C$10" or None on error.
+        """
+        try:
+            sheet, r1, c1, r2, c2 = range_list
+            # Convert to 1-based rows
+            r1_1 = int(r1) + 1
+            r2_1 = int(r2) + 1
+            c1_a = self._col_idx_to_excel(int(c1))
+            c2_a = self._col_idx_to_excel(int(c2))
+            # Escape sheet name if it has spaces or special chars
+            sheet_str = str(sheet)
+            if ' ' in sheet_str or any(ch in sheet_str for ch in "'![]:/\\"):
+                sheet_name = f"'{sheet_str}'"
+            else:
+                sheet_name = sheet_str
+            return f"{sheet_name}!${c1_a}${r1_1}:${c2_a}${r2_1}"
+        except Exception:
+            return None

@@ -1,12 +1,12 @@
 {
   "registry_directories": [
     "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE",
-    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB",
-    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LF\\RELIABIL"
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LF\\RELIABIL",
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB"
   ],
   "inf_directories": [
-    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE",
     "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB\\Prove Effettuate SalaProve",
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE",
     "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB"
   ],
   "exact_paths": {

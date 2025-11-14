@@ -370,15 +370,17 @@ class SapSheetBuilder:
                         elif isinstance(value, int):
                             fmt_name = 'integer'
                         col_name_lower = str(df.columns[c_idx]).lower()
+                        write_value = value
                         if 'efficiency' in col_name_lower or '%' in col_name_lower:
                             # Check if value is already in percentage format (0-100 range) vs decimal format (0-1 range)
                             if isinstance(value, (int, float)) and not pd.isna(value):
-                                if value <= 1.0:
-                                    # Value is in decimal format (e.g., 0.855), convert to percentage for display
+                                if value > 1.0:
+                                    # Value is in percentage format (e.g., 85.5), convert to decimal for Excel percent format
+                                    write_value = value / 100.0  # Convert 85.5 to 0.855
                                     fmt_name = 'percent'
                                 else:
-                                    # Value is already in percentage format (e.g., 85.5), display as decimal
-                                    fmt_name = 'decimal_2'
+                                    # Value is already in decimal format (e.g., 0.855)
+                                    fmt_name = 'percent'
                             else:
                                 fmt_name = 'decimal_2'
 
@@ -394,7 +396,7 @@ class SapSheetBuilder:
                                 fmt_name = 'test_divider_cell'
 
                         # Safely handle the value to prevent Excel corruption
-                        safe_value = value
+                        safe_value = write_value
                         if isinstance(value, (int, float)):
                             if pd.isna(value) or not np.isfinite(value):
                                 safe_value = "N/A"
@@ -445,19 +447,21 @@ class SapSheetBuilder:
                     if isinstance(value, str): fmt_name = 'cell'
                     elif isinstance(value, int): fmt_name = 'integer'
                     col_name_lower = str(combined_df.columns[c_idx]).lower()
+                    write_value = value
                     if 'efficiency' in col_name_lower or '%' in col_name_lower:
                         # Check if value is already in percentage format (0-100 range) vs decimal format (0-1 range)
                         if isinstance(value, (int, float)) and not pd.isna(value):
-                            if value <= 1.0:
-                                # Value is in decimal format (e.g., 0.855), convert to percentage for display
+                            if value > 1.0:
+                                # Value is in percentage format (e.g., 85.5), convert to decimal for Excel percent format
+                                write_value = value / 100.0  # Convert 85.5 to 0.855
                                 fmt_name = 'percent'
                             else:
-                                # Value is already in percentage format (e.g., 85.5), display as decimal
-                                fmt_name = 'decimal_2'
+                                # Value is already in decimal format (e.g., 0.855)
+                                fmt_name = 'percent'
                         else:
                             fmt_name = 'decimal_2'
                     # Safely handle the value to prevent Excel corruption
-                    safe_value = value
+                    safe_value = write_value
                     if isinstance(value, (int, float)):
                         if pd.isna(value) or not np.isfinite(value):
                             safe_value = "N/A"
@@ -544,7 +548,7 @@ class SapSheetBuilder:
             return
 
         for chart_idx, cfg in enumerate(chart_configs):
-            chart = self._create_chart(cfg['title'], cfg['x_axis_label'], cfg['y_axis_label'])
+            chart = self.helper.create_chart(cfg['title'], cfg['x_axis_label'], cfg['y_axis_label'])
             if not chart:
                 self.logger.warning(f"Skipping chart '{cfg['title']}' due to creation failure.")
                 continue
@@ -577,56 +581,56 @@ class SapSheetBuilder:
                 
                 # Define automatic data ranges that adjust to actual data size
                 # This ensures charts only include valid data points, not empty cells
-                x_values = f"='{self.sheet_name}'!${xl_col_to_name(x_col_idx)}${current_data_row + 1}:${xl_col_to_name(x_col_idx)}${current_data_row + num_data_points}"
-                y_values = f"='{self.sheet_name}'!${xl_col_to_name(y_col_idx)}${current_data_row + 1}:${xl_col_to_name(y_col_idx)}${current_data_row + num_data_points}"
+                # Use explicit range references to avoid off-by-one or quoting issues
+                x_values = [
+                    self.sheet_name,
+                    current_data_row,
+                    col_offset + x_col_idx,
+                    current_data_row + num_data_points - 1,
+                    col_offset + x_col_idx,
+                ]
+                y_values = [
+                    self.sheet_name,
+                    current_data_row,
+                    col_offset + y_col_idx,
+                    current_data_row + num_data_points - 1,
+                    col_offset + y_col_idx,
+                ]
                 
-                chart.add_series({
-                    'name':       series_name,
-                    'categories': x_values,
-                    'values':     y_values,
-                    'marker':     {'type': 'circle', 'size': 5},
-                    'line':       {'width': 2.0}
-                })
+                # Validate that the y-column contains numeric, finite data before adding series
+                try:
+                    col_series = df.iloc[:, y_col_idx]
+                    # Drop NaNs and check for at least one finite numeric value
+                    numeric_vals = col_series.dropna()
+                    if numeric_vals.empty or not np.isfinite(numeric_vals.astype(float)).any():
+                        self.logger.warning(f"Skipping series '{series_name}' for chart '{cfg['title']}': no numeric data in column '{cfg['y_col']}'")
+                        # Move current_data_row forward by num_data_points and continue
+                        current_data_row += num_data_points
+                        continue
+                except Exception as e:
+                    self.logger.debug(f"Could not validate numeric data for series '{series_name}': {e}")
+
+                self.helper.add_chart_series(
+                    chart=chart,
+                    series_name=series_name,
+                    x_range=x_values,
+                    y_range=y_values
+                )
                 has_series = True
                 current_data_row += num_data_points
 
             if has_series:
-                chart.set_size({'width': chart_pixel_width, 'height': chart_pixel_height})
                 insert_row, insert_col = chart_positions[chart_idx]
-                self.ws.insert_chart(insert_row, insert_col, chart)
+                self.helper.insert_chart_with_size(
+                    chart=chart,
+                    row=insert_row,
+                    col=insert_col,
+                    width=chart_pixel_width,
+                    height=chart_pixel_height
+                )
                 max_chart_row_span = max(max_chart_row_span, 22) # 400px height is ~20 rows
         
         self.current_row = charts_block_start_row + max_chart_row_span * 2 + 2 # Update current row after all charts
-
-    def _create_chart(self, title: str, x_axis_label: str, y_axis_label: str) -> Optional[XlsxChart]:
-        chart = self.wb.add_chart({'type': 'scatter', 'subtype': 'smooth'})
-        if not chart:
-            self.logger.error(f"Failed to create chart: {title}")
-            return None
-        chart.set_title({'name': title, 'name_font': {'size': 12, 'bold': True}})
-        chart.set_x_axis({
-            'name': x_axis_label, 
-            'name_font': {'size': 10, 'bold': True},
-            'num_font': {'size': 9},
-            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
-        })
-        chart.set_y_axis({
-            'name': y_axis_label, 
-            'name_font': {'size': 10, 'bold': True},
-            'num_font': {'size': 9},
-            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
-        })
-        chart.set_legend({'position': 'bottom'})
-        chart.set_plotarea({
-            'border': {'color': '#D9D9D9', 'width': 1},
-            'layout': {
-                'x':      0.12,
-                'y':      0.1,
-                'width':  0.85,
-                'height': 0.65,
-            }
-        })
-        return chart
 
     def _get_unit_info(self, measurement: str) -> Dict[str, str]:
         if self.unit_metadata and measurement in self.unit_metadata:
@@ -974,13 +978,17 @@ class SapSheetBuilder:
                             'name': 'Frequency (Hz)',
                             'name_font': {'size': 10},
                             'num_font': {'size': 9},
-                            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
+                            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}},
+                            'major_tick_mark': 'outside',
+                            'line': {'color': '#595959', 'width': 1.0}
                         })
                         freq_chart.set_y_axis({
                             'name': 'Sound Level (dB)',
                             'name_font': {'size': 10},
                             'num_font': {'size': 9},
-                            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
+                            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}},
+                            'major_tick_mark': 'outside',
+                            'line': {'color': '#595959', 'width': 1.0}
                         })
                         freq_chart.set_size({'width': 480, 'height': 320})
                         freq_chart.set_legend({'position': 'bottom', 'font': {'size': 9}})
@@ -1004,12 +1012,16 @@ class SapSheetBuilder:
                         })
                         bar_chart.set_x_axis({
                             'name': 'Measurement Type',
-                            'num_font': {'size': 9}
+                            'num_font': {'size': 9},
+                            'major_tick_mark': 'outside',
+                            'line': {'color': '#595959', 'width': 1.0}
                         })
                         bar_chart.set_y_axis({
                             'name': 'Level (dB)',
                             'num_font': {'size': 9},
-                            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}}
+                            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}},
+                            'major_tick_mark': 'outside',
+                            'line': {'color': '#595959', 'width': 1.0}
                         })
                         bar_chart.set_size({'width': 300, 'height': 320})
                         bar_chart.set_legend({'position': 'top', 'font': {'size': 9}})  # Enable legend with proper positioning
@@ -1162,7 +1174,7 @@ class SapSheetBuilder:
             # Collect all available images for this test
             available_images = []
             if image_path and Path(image_path).exists():
-                available_images.append(image_path)
+                available_images.append(str(image_path))
             if image_paths:
                 for img_path in image_paths:
                     if Path(img_path).exists() and str(img_path) not in available_images:
@@ -1176,7 +1188,7 @@ class SapSheetBuilder:
                 label = filename.replace('_', ' ').replace('GRAFICO ', '').strip()
                 if not label:  # Fallback if filename is empty
                     label = f"Test {test_number} Image"
-                
+
                 all_images.append({
                     'path': actual_image_path,
                     'label': label,
@@ -1212,7 +1224,8 @@ class SapSheetBuilder:
             
             # Insert the image
             try:
-                self.ws.insert_image(insert_row, insert_col, image_info['path'], {
+                img_path_str = str(image_info['path'])
+                self.ws.insert_image(insert_row, insert_col, img_path_str, {
                     'x_scale': 0.5, 'y_scale': 0.5,  # Adjust scaling as needed
                     'object_position': 1
                 })

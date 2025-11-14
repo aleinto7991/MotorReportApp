@@ -1,9 +1,10 @@
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 
 import pandas as pd
 from xlsxwriter.worksheet import Worksheet as XlsxWorksheet
 from xlsxwriter.workbook import Workbook as XlsxWorkbook
+from xlsxwriter.chart import Chart as XlsxChart
 
 from .excel_formatter import ExcelFormatter
 
@@ -79,3 +80,121 @@ class ExcelSheetHelper:
                                             {'type': 'bottom', 'value': 1, 'format': self.formatter.get('red_highlight')})
                 except Exception as e:
                      self.logger.warning(f"Error applying conditional format to col {col_name}: {e}")
+
+    def create_chart(self, title: str, x_axis_label: str, y_axis_label: str, 
+                     chart_type: str = 'scatter', subtype: str = 'smooth') -> Optional[XlsxChart]:
+        """
+        Create a chart with standard styling.
+        
+        Args:
+            title: Chart title
+            x_axis_label: Label for X-axis
+            y_axis_label: Label for Y-axis
+            chart_type: Chart type (default: 'scatter')
+            subtype: Chart subtype (default: 'smooth')
+            
+        Returns:
+            Chart object or None if creation failed
+        """
+        chart = self.wb.add_chart({'type': chart_type, 'subtype': subtype})
+        if not chart:
+            self.logger.error(f"Failed to create chart: {title}")
+            return None
+        
+        # Set title
+        chart.set_title({'name': title, 'name_font': {'size': 12, 'bold': True}})
+        
+        # Set X-axis with standard styling
+        chart.set_x_axis({
+            'name': x_axis_label,
+            'name_font': {'size': 10, 'bold': True},
+            'num_font': {'size': 9, 'bold': False},
+            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}},
+            'major_tick_mark': 'outside',
+            'line': {'color': '#595959', 'width': 1.0}
+        })
+        
+        # Set Y-axis with standard styling
+        chart.set_y_axis({
+            'name': y_axis_label,
+            'name_font': {'size': 10, 'bold': True},
+            'num_font': {'size': 9, 'bold': False},
+            'major_gridlines': {'visible': True, 'line': {'color': '#D9D9D9'}},
+            'major_tick_mark': 'outside',
+            'line': {'color': '#595959', 'width': 1.0}
+        })
+        
+        # Set legend position
+        chart.set_legend({'position': 'bottom'})
+        
+        return chart
+
+    def add_chart_series(self, chart: XlsxChart, series_name: str, 
+                        x_range: List, y_range: List, 
+                        color: Optional[str] = None,
+                        marker_size: int = 5, line_width: float = 2.0):
+        """
+        Add a data series to a chart.
+        
+        Args:
+            chart: Chart object to add series to
+            series_name: Name of the series for legend
+            x_range: X-axis data range [sheet_name, row_start, col_start, row_end, col_end]
+            y_range: Y-axis data range [sheet_name, row_start, col_start, row_end, col_end]
+            color: Optional color hex code (e.g., '#4472C4')
+            marker_size: Size of marker points (default: 5)
+            line_width: Width of line (default: 2.0)
+        """
+        # Validate ranges
+        if not x_range or not y_range:
+            self.logger.warning(f"Skipping series '{series_name}': missing x_range or y_range")
+            return
+
+        # Determine chart type if possible and set series keys accordingly.
+        # For scatter charts XlsxWriter expects 'x_values' and 'y_values'.
+        # For line/column charts it expects 'categories' and 'values'.
+        chart_type = None
+        try:
+            chart_type = getattr(chart, 'type', None) or getattr(chart, 'chart_type', None)
+        except Exception:
+            chart_type = None
+
+        is_scatter = False
+        if isinstance(chart_type, str) and chart_type.lower() == 'scatter':
+            is_scatter = True
+
+        series_config = {'name': series_name, 'marker': {'type': 'circle', 'size': marker_size}, 'line': {'width': line_width}}
+
+        if is_scatter:
+            series_config['x_values'] = x_range
+            series_config['y_values'] = y_range
+        else:
+            series_config['categories'] = x_range
+            series_config['values'] = y_range
+        
+        # Add color if specified
+        if color:
+            series_config['marker']['fill'] = {'color': color}
+            series_config['marker']['border'] = {'color': color}
+            series_config['line']['color'] = color
+        
+        try:
+            chart.add_series(series_config)
+        except Exception as e:
+            self.logger.error(f"Failed to add series '{series_name}' to chart: {e}")
+            raise
+
+    def insert_chart_with_size(self, chart: XlsxChart, row: int, col: int, 
+                               width: int = 680, height: int = 400):
+        """
+        Insert a chart into the worksheet with specified size.
+        
+        Args:
+            chart: Chart object to insert
+            row: Row index where chart should be inserted
+            col: Column index where chart should be inserted
+            width: Chart width in pixels (default: 680)
+            height: Chart height in pixels (default: 400)
+        """
+        chart.set_size({'width': width, 'height': height})
+        self.ws.insert_chart(row, col, chart)

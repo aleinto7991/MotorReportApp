@@ -282,9 +282,8 @@ class NoiseChartGenerator:
                 
                 # Set the legend label for this series
                 if chart.series and len(chart.series) > mic_index:
-                    from openpyxl.chart.series import SeriesLabel
-                    series_label = SeriesLabel(v=mic_names[mic_index])
-                    chart.series[mic_index].title = series_label
+                    # Set chart series title as a plain string so openpyxl writes a visible legend label
+                    chart.series[mic_index].title = mic_names[mic_index]
             
             # Set category axis to frequencies - be very explicit about range
             freq_ref = Reference(worksheet, 
