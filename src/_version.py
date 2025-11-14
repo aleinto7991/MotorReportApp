@@ -1,3 +1,3 @@
 """Single source of truth for project version."""
 
-VERSION = "3.1.0"
+VERSION = "3.1.1"
