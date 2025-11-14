@@ -1,0 +1,20 @@
+{
+  "registry_directories": [
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LF\\RELIABIL",
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB",
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE"
+  ],
+  "inf_directories": [
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE",
+    "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB"
+  ],
+  "exact_paths": {
+    "ProveEffettuate": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB\\Prove Effettuate SalaProve\\ProveEffettuate",
+    "Prove Effettuate SalaProve": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB\\Prove Effettuate SalaProve",
+    "Tests Rumore": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE\\Tests Rumore",
+    "Registro LAB.xlsx": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB\\Registro LAB.xlsx",
+    "REGISTRO RUMORE.xlsx": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\RUMORE\\REGISTRO RUMORE.xlsx",
+    "REGISTRO LF .xlsx": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LF\\RELIABIL\\REGISTRO LF .xlsx",
+    "CARICHI NOMINALI": "C:\\Users\\aintorbida\\OneDrive - AMETEK Inc\\ENG & Quality\\UTE_wrk\\LAB\\TEST_LAB\\CARICHI NOMINALI"
+  }
+}
