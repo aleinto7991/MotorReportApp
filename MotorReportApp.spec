@@ -1,5 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+try:
+    from src._version import VERSION
+except Exception:
+    VERSION = "3.1.0"
 
 datas = []
 binaries = []
@@ -101,7 +105,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MotorReportApp',
+    name=f'MotorReportApp-{VERSION}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -55,6 +55,10 @@ from ..config.directory_config import PROJECT_ROOT
 from ..core.motor_report_engine import MotorReportApp
 from ..config.app_config import AppConfig
 from ..core.telemetry import log_duration
+try:
+    from src._version import VERSION
+except Exception:
+    from .._version import VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +345,7 @@ class MotorReportAppGUI:
         self.page.add(
             ft.Column(
                 [
-                    ft.Text("Motor Report Generator", size=32, weight=ft.FontWeight.BOLD),
+                    ft.Text(f"Motor Report Generator v{VERSION}", size=32, weight=ft.FontWeight.BOLD),
                     ft.Divider(),
                     self.tabs,
                     ft.Divider(),

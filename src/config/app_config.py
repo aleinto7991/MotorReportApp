@@ -3,6 +3,11 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Set
+try:
+    from src._version import VERSION
+except Exception:
+    # Fallback if package import context differs
+    from .._version import VERSION
 
 
 @dataclass
@@ -35,7 +40,8 @@ class AppConfig:
     include_comparison: bool = True # Workflow toggle
     open_after_creation: bool = False
     verbose: bool = False
-    script_version: str = "3.2.0"
+    # Keep a single source of truth for version
+    script_version: str = VERSION
     registry_sheet_name: str = "REGISTRO" # Changed to match actual Excel sheet
     noise_registry_sheet_name: Optional[str] = None
     noise_saps: List[str] = field(default_factory=list)  # Track selected noise SAP codes
