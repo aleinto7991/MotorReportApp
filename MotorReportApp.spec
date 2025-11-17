@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+import os
 try:
     from src._version import VERSION
 except Exception:
@@ -62,9 +63,26 @@ hiddenimports += collect_submodules('starlette')
 hiddenimports += collect_submodules('fastapi')
 hiddenimports += collect_submodules('websockets')
 
-# Add assets
-datas += [('assets\\logo.png', 'assets')]
-datas += [('assets\\logo.ico', 'assets')]
+# Collect large data-processing libs to ensure submodules are included
+for pkg in ('pandas', 'numpy', 'openpyxl', 'xlsxwriter', 'PIL'):
+    try:
+        hiddenimports += collect_submodules(pkg)
+    except Exception:
+        # Skip optional or missing extensions (e.g., numba for pandas) during spec evaluation
+        pass
+
+# Add assets: include entire assets folder so runtime files are available
+assets_root = os.path.join(os.getcwd(), 'assets')
+if os.path.isdir(assets_root):
+    for root, dirs, files in os.walk(assets_root):
+        for fname in files:
+            src_path = os.path.join(root, fname)
+            rel_dir = os.path.relpath(root, assets_root)
+            dest_dir = os.path.join('assets', rel_dir) if rel_dir != '.' else 'assets'
+            datas.append((src_path, dest_dir))
+
+# Defensive: do not bundle repository-level directory cache files
+datas = [d for d in datas if not os.path.basename(d[0]).lower().startswith('directory_cache')]
 
 
 a = Analysis(

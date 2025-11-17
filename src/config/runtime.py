@@ -233,6 +233,62 @@ def log_runtime_info():
     logger.info("=" * 30)
 
 
+def get_user_data_dir(app_name: str = "MotorReportApp") -> Path:
+    """
+    Get a platform-appropriate per-user application data directory.
+
+    Precedence:
+    - Environment variable `MOTOR_REPORT_USER_DATA_DIR` if set
+    - On Windows: `%LOCALAPPDATA%/<app_name>`
+    - On macOS: `~/Library/Application Support/<app_name>`
+    - On Linux / XDG: `$XDG_DATA_HOME/<app_name>` or `~/.local/share/<app_name>`
+
+    Ensures the directory exists and is writable (attempts to create it).
+    """
+    env_override = os.environ.get('MOTOR_REPORT_USER_DATA_DIR')
+    if env_override:
+        p = Path(env_override)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            logger.debug(f"Could not create env override user data dir: {p}")
+        return p
+
+    # Windows
+    if os.name == 'nt':
+        local_app = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+        if local_app:
+            p = Path(local_app) / app_name
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                logger.debug(f"Could not create user data dir under LOCALAPPDATA: {p}")
+            return p
+
+    # macOS
+    if sys.platform == 'darwin':
+        p = Path.home() / 'Library' / 'Application Support' / app_name
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            logger.debug(f"Could not create macOS user data dir: {p}")
+        return p
+
+    # Linux / XDG
+    xdg = os.environ.get('XDG_DATA_HOME')
+    if xdg:
+        p = Path(xdg) / app_name
+    else:
+        p = Path.home() / '.local' / 'share' / app_name
+
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        logger.debug(f"Could not create XDG user data dir: {p}")
+
+    return p
+
+
 # Auto-bootstrap when imported (can be disabled by checking a flag)
 if os.getenv('MOTOR_REPORT_NO_AUTO_BOOTSTRAP') != '1':
     _runtime_config = bootstrap_runtime()

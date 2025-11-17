@@ -53,6 +53,7 @@ from .theme import set_user_theme
 
 # Project specific imports
 from ..config.directory_config import PROJECT_ROOT
+from ..config.directory_config import ensure_directories_initialized
 from ..core.motor_report_engine import MotorReportApp
 from ..config.app_config import AppConfig
 from ..core.telemetry import log_duration
@@ -882,7 +883,30 @@ def main(page: ft.Page):
     
     # Set project root for the application
     page.client_storage.set("project_root", str(PROJECT_ROOT))
-    
+    # Ensure data directories are initialized (per-user auto-discovery)
+    try:
+        ensure_directories_initialized()
+    except Exception:
+        logger.debug("ensure_directories_initialized() failed or deferred")
+
+    # Ensure per-user directory cache file exists (create empty cache on first startup)
+    try:
+        from ..config.directory_cache import get_directory_cache
+        cache = get_directory_cache()
+        # Log effective cache path for troubleshooting and visibility
+        try:
+            logger.info(f"Directory cache path: {cache.cache_file}")
+        except Exception:
+            logger.debug("Could not read cache.cache_file for logging")
+
+        # Ensure cache file exists on disk (uses atomic write)
+        try:
+            cache.ensure_exists()
+        except Exception:
+            logger.debug("Could not ensure per-user directory cache file exists")
+    except Exception:
+        logger.debug("Directory cache initialization skipped")
+
     gui = MotorReportAppGUI(page)
     page.update()
 
