@@ -7,7 +7,6 @@ pandas>=2.0.0
 xlsxwriter>=3.0.0
 pillow>=10.0.0
 openpyxl>=3.1.0
-playwright>=1.40.0
 
 # Legacy Excel file support (.xls format)
 # Required for reading test-lab workbooks in CARICHI NOMINALI directory
