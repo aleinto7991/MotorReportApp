@@ -3,7 +3,6 @@ from typing import List, Dict, Optional, cast
 from pathlib import Path
 
 import pandas as pd
-import openpyxl
 from xlsxwriter.workbook import Workbook as XlsxWorkbook
 
 from ..config.app_config import AppConfig
@@ -12,10 +11,11 @@ from .builders.excel_formatter import ExcelFormatter
 from .builders.sap_sheet_builder import SapSheetBuilder
 from .builders.summary_sheet_builder import SummarySheetBuilder
 from .builders.comparison_sheet_builder import ComparisonSheetBuilder
+from .builders.carichi_sheet_builder import CarichiSheetBuilder
 from ..analysis.image_utils import extract_dominant_colors
 from ..utils.common import sanitize_sheet_name
 from .excel_profiler import ExcelProfiler
-from ..services.test_lab_summary_loader import TestLabSummaryLoader
+from ..services.directory_locator import DirectoryLocator
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,10 @@ class ExcelReport:
         if not self.output_path:
             raise ValueError("Output path must be set in the configuration.")
         
-        self.logo_path = config.logo_path
+        resolved_logo_path = self._resolve_logo_path(config.logo_path)
+        if resolved_logo_path and config.logo_path != resolved_logo_path:
+            config.logo_path = resolved_logo_path
+        self.logo_path = resolved_logo_path
         self.noise_handler = noise_handler  # Store the noise handler
         self.writer: Optional[pd.ExcelWriter] = None
         self.workbook: Optional[XlsxWorkbook] = None
@@ -75,8 +78,8 @@ class ExcelReport:
                 self.workbook = cast(XlsxWorkbook, writer.book)
                 
                 with self.profiler.time_operation("extract_logo_colors"):
-                    if self.config.logo_path and Path(self.config.logo_path).exists():
-                        self.logo_tab_colors = extract_dominant_colors(str(self.config.logo_path))
+                    if self.logo_path and Path(self.logo_path).exists():
+                        self.logo_tab_colors = extract_dominant_colors(str(self.logo_path))
                     else:
                         self.logger.warning("Logo path not found, using default colors.")
                         self.logo_tab_colors = ['#0070C0', '#C00000', '#00B050', '#FFC000']
@@ -116,10 +119,6 @@ class ExcelReport:
 
             self.logger.info(f"Successfully generated Excel report at {self.output_path}")
             
-            # Copy raw Scheda and Collaudo sheets after xlsxwriter finishes
-            with self.profiler.time_operation("copy_raw_test_lab_sheets"):
-                self._copy_raw_test_lab_sheets(grouped_data)
-            
             # End profiling and print report
             if self.enable_profiling:
                 self.profiler.end_session()
@@ -147,8 +146,18 @@ class ExcelReport:
         summary_builder.build()
 
     def _create_sap_sheets(self, grouped_data: Dict[str, List[MotorTestData]], all_noise_tests_by_sap: Dict[str, List[NoiseTestInfo]]):
-        """Creates a sheet for each SAP code."""
-        if not self.workbook or not self.formatter: return
+        """Creates a sheet for each SAP code and a consolidated 'CARICHI NOMINALI' sheet."""
+        if not self.workbook or not self.formatter:
+            return
+
+        # Create a single CarichiSheetBuilder that will accumulate data across SAPs
+        carichi_builder = CarichiSheetBuilder(
+            workbook=self.workbook,
+            formatter=self.formatter,
+            logo_tab_colors=self.logo_tab_colors,
+            logo_path=self.logo_path,
+        )
+
         for sap_code, tests in grouped_data.items():
             sap_builder = SapSheetBuilder(
                 workbook=self.workbook,
@@ -161,6 +170,12 @@ class ExcelReport:
                 noise_handler=self.noise_handler  # Pass the noise handler
             )
             sap_builder.build()
+
+            # Add SAP data to the consolidated Carichi builder (it will skip tests without summaries)
+            carichi_builder.add_sap_data(sap_code, tests)
+
+        # After iterating all SAPs, build the single consolidated sheet
+        carichi_builder.build()
 
     def _create_comparison_sheet(self, comparison_data: Dict[str, List[MotorTestData]], sap_sheet_name_map: Dict[str, str]):
         """Creates the comparison sheet if enabled."""
@@ -232,388 +247,27 @@ class ExcelReport:
         
         return comparison_data
 
-    def _copy_raw_test_lab_sheets(self, grouped_data: Dict[str, List[MotorTestData]]) -> None:
-        """Copy raw Scheda and Collaudo sheets from test lab workbooks after report generation."""
-        if not self.output_path or not self.output_path.exists():
-            self.logger.warning("Cannot copy raw sheets: output file not found")
-            return
-        
-        # Initialize the test lab summary loader
-        test_lab_root = self.config.test_lab_root
-        if not test_lab_root or not Path(test_lab_root).exists():
-            self.logger.warning("Test lab root path not configured or not found, skipping raw sheet copying")
-            return
-        
-        loader = TestLabSummaryLoader(base_path=Path(test_lab_root))
-        
-        # Open the generated report with openpyxl
-        try:
-            openpyxl_wb = openpyxl.load_workbook(self.output_path)
-            
-            # Process each SAP code
-            for sap_code, tests in grouped_data.items():
-                self._create_collaudo_nominale_sheet(openpyxl_wb, sap_code, tests, loader)
-            
-            # Save the modified workbook to a new file to avoid corrupting charts
-            try:
-                postprocessed_path = self.output_path.with_name(self.output_path.stem + "_with_raw" + self.output_path.suffix)
-                openpyxl_wb.save(postprocessed_path)
-                openpyxl_wb.close()
+    def _resolve_logo_path(self, candidate: Optional[str]) -> Optional[str]:
+        """Find a usable logo asset path, falling back to auto-detected directories."""
+        if candidate:
+            candidate_path = Path(candidate)
+            if candidate_path.exists():
+                return str(candidate_path)
 
-                self.logger.info(
-                    "Successfully created COLLAUDO NOMINALE sheets; saved post-processed workbook to %s",
-                    postprocessed_path,
-                )
-                self.logger.info("Original workbook with charts preserved at %s", self.output_path)
-            except Exception as e:
-                # If saving to alternate path fails, attempt to save to original path as a last resort
-                try:
-                    self.logger.warning("Failed to save post-processed workbook to alternate path: %s. Attempting to save to original path.", e)
-                    openpyxl_wb.save(self.output_path)
-                    openpyxl_wb.close()
-                    self.logger.info("Saved post-processed workbook to original path %s (may overwrite charts)", self.output_path)
-                except Exception as e2:
-                    self.logger.error("Failed to save post-processed workbook: %s", e2, exc_info=True)
-            
-        except Exception as e:
-            self.logger.error(f"Failed to create COLLAUDO NOMINALE sheets: {e}", exc_info=True)
-    
-    def _create_collaudo_nominale_sheet(
-        self, 
-        workbook: openpyxl.Workbook, 
-        sap_code: str, 
-        tests: List[MotorTestData],
-        loader: 'TestLabSummaryLoader'
-    ) -> None:
-        """Create a single COLLAUDO NOMINALE sheet for a SAP code with Scheda on left, Collaudo on right."""
-        from openpyxl.utils import get_column_letter
-        from openpyxl.drawing.image import Image as OpenpyxlImage
-        import openpyxl.styles
-        
-        sheet_name = f"COLLAUDO NOMINALE - {sap_code}"
-        
-        # Ensure unique sheet name (max 31 chars for Excel)
-        if len(sheet_name) > 31:
-            sheet_name = f"COLLAUDO NOM - {sap_code}"[:31]
-        
-        if sheet_name in workbook.sheetnames:
-            counter = 1
-            while f"{sheet_name}_{counter}" in workbook.sheetnames:
-                counter += 1
-            sheet_name = f"{sheet_name}_{counter}"[:31]
-        
-        # Create sheet
-        target_sheet = workbook.create_sheet(title=sheet_name)
-        
-        # Set tab color to match theme (use logo colors if available)
+        locator = DirectoryLocator(logger=self.logger)
+        fallback = locator.logo_path
+        if fallback and fallback.exists():
+            return str(fallback)
+
+        # 3. Hardcoded fallback relative to this file
         try:
-            if self.logo_tab_colors and len(self.logo_tab_colors) > 0:
-                # Use first logo color for consistency with SAP sheets
-                color_hex = self.logo_tab_colors[0].lstrip('#')
-                target_sheet.sheet_properties.tabColor = color_hex
-            else:
-                # Default blue color
-                target_sheet.sheet_properties.tabColor = "0070C0"
-        except:
+            # src/reports/excel_report.py -> src/reports -> src -> root -> assets/logo.png
+            fallback_path = Path(__file__).resolve().parent.parent.parent / 'assets' / 'logo.png'
+            if fallback_path.exists():
+                return str(fallback_path)
+        except Exception:
             pass
-        
-        # Add logo at top (matching other sheets)
-        logo_added = False
-        if self.config.logo_path and Path(self.config.logo_path).exists():
-            try:
-                img = OpenpyxlImage(str(self.config.logo_path))
-                # Scale logo to fit in header area
-                img.width = 120
-                img.height = 60
-                target_sheet.add_image(img, 'A1')
-                logo_added = True
-            except Exception as e:
-                self.logger.warning(f"Could not add logo to COLLAUDO NOMINALE sheet: {e}")
-        
-        # Collect all Scheda and Collaudo sheets from all tests for this SAP
-        all_scheda_data = []
-        all_collaudo_data = []
-        workbooks_to_close = []
-        
-        for test in tests:
-            test_number = test.test_number
-            if not test_number:
-                continue
-            
-            try:
-                sheets_data = loader.get_raw_sheets_data(test_number)
-                if sheets_data:
-                    scheda_sheets = sheets_data.get('scheda', [])
-                    collaudo_sheets = sheets_data.get('collaudo', [])
-                    source_wb = sheets_data.get('workbook')
-                    
-                    for sheet in scheda_sheets:
-                        all_scheda_data.append((test_number, sheet))
-                    for sheet in collaudo_sheets:
-                        all_collaudo_data.append((test_number, sheet))
-                    
-                    if source_wb:
-                        workbooks_to_close.append(source_wb)
-                        
-            except Exception as e:
-                self.logger.error(f"Failed to get sheets for test {test_number}: {e}")
-        
-        if not all_scheda_data and not all_collaudo_data:
-            self.logger.warning(f"No Scheda or Collaudo sheets found for SAP {sap_code}")
-            workbook.remove(target_sheet)
-            for wb in workbooks_to_close:
-                wb.close()
-            return
-        
-        # Set column widths for header area
-        for col in range(1, 17):  # A-P
-            target_sheet.column_dimensions[get_column_letter(col)].width = 15
-        
-        # Add header section (start after logo if present)
-        header_start_row = 4 if logo_added else 1
-        
-        header_font = openpyxl.styles.Font(name='Calibri', size=14, bold=True, color="FFFFFF")
-        header_fill = openpyxl.styles.PatternFill(start_color="0070C0", end_color="0070C0", fill_type="solid")
-        header_alignment = openpyxl.styles.Alignment(horizontal="center", vertical="center")
-        
-        # Main title spanning both sections
-        target_sheet.cell(row=header_start_row, column=1, value=f"COLLAUDO NOMINALE - SAP {sap_code}")
-        target_sheet.cell(row=header_start_row, column=1).font = header_font
-        target_sheet.cell(row=header_start_row, column=1).fill = header_fill
-        target_sheet.cell(row=header_start_row, column=1).alignment = header_alignment
-        target_sheet.row_dimensions[header_start_row].height = 25
-        
-        # Determine layout columns
-        max_scheda_cols = 0
-        for _, sheet in all_scheda_data:
-            max_col = sheet.max_column or 10
-            max_scheda_cols = max(max_scheda_cols, max_col)
-        
-        # Merge title across full width
-        right_col_start = max_scheda_cols + 4  # 3-column gap
-        max_collaudo_cols = 0
-        for _, sheet in all_collaudo_data:
-            max_col = sheet.max_column or 10
-            max_collaudo_cols = max(max_collaudo_cols, max_col)
-        
-        total_cols = right_col_start + max_collaudo_cols
-        try:
-            target_sheet.merge_cells(start_row=header_start_row, start_column=1, end_row=header_start_row, end_column=min(total_cols, 50))
-        except:
-            pass
-        
-        # Section headers
-        section_font = openpyxl.styles.Font(name='Calibri', size=12, bold=True, color="FFFFFF")
-        section_fill = openpyxl.styles.PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        section_alignment = openpyxl.styles.Alignment(horizontal="center", vertical="center")
-        
-        section_header_row = header_start_row + 1
-        
-        # Scheda header
-        target_sheet.cell(row=section_header_row, column=1, value="SCHEDA / SCHEDA SR")
-        target_sheet.cell(row=section_header_row, column=1).font = section_font
-        target_sheet.cell(row=section_header_row, column=1).fill = section_fill
-        target_sheet.cell(row=section_header_row, column=1).alignment = section_alignment
-        target_sheet.row_dimensions[section_header_row].height = 20
-        try:
-            target_sheet.merge_cells(start_row=section_header_row, start_column=1, end_row=section_header_row, end_column=max_scheda_cols)
-        except:
-            pass
-        
-        # Collaudo header
-        target_sheet.cell(row=section_header_row, column=right_col_start, value="COLLAUDO / COLLAUDO SR")
-        target_sheet.cell(row=section_header_row, column=right_col_start).font = section_font
-        target_sheet.cell(row=section_header_row, column=right_col_start).fill = section_fill
-        target_sheet.cell(row=section_header_row, column=right_col_start).alignment = section_alignment
-        try:
-            target_sheet.merge_cells(start_row=section_header_row, start_column=right_col_start, end_row=section_header_row, end_column=right_col_start + max_collaudo_cols - 1)
-        except:
-            pass
-        
-        # Layout: Scheda on left, Collaudo on right
-        current_row_left = header_start_row + 3  # Start after headers
-        current_row_right = header_start_row + 3
-        left_col = 1
-        
-        # Test label formatting
-        test_label_font = openpyxl.styles.Font(name='Calibri', size=11, bold=True, color="1F4E78")
-        test_label_fill = openpyxl.styles.PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-        test_label_alignment = openpyxl.styles.Alignment(horizontal="left", vertical="center")
-        
-        # Copy Scheda sheets vertically on the left
-        for test_number, source_sheet in all_scheda_data:
-            # Add test label with styling
-            label_cell = target_sheet.cell(row=current_row_left, column=left_col, value=f"Test {test_number} - {source_sheet.title}")
-            label_cell.font = test_label_font
-            label_cell.fill = test_label_fill
-            label_cell.alignment = test_label_alignment
-            target_sheet.row_dimensions[current_row_left].height = 20
-            
-            # Merge label across Scheda section
-            try:
-                target_sheet.merge_cells(start_row=current_row_left, start_column=left_col, end_row=current_row_left, end_column=max_scheda_cols)
-            except:
-                pass
-            
-            current_row_left += 1
-            
-            # Copy sheet content
-            self._copy_sheet_content_to_position(source_sheet, target_sheet, current_row_left, left_col)
-            
-            # Update current row (move down past this sheet + gap)
-            rows_copied = source_sheet.max_row or 20
-            current_row_left += rows_copied + 3  # 3-row gap between sheets
-        
-        # Copy Collaudo sheets vertically on the right
-        for test_number, source_sheet in all_collaudo_data:
-            # Add test label with styling
-            label_cell = target_sheet.cell(row=current_row_right, column=right_col_start, value=f"Test {test_number} - {source_sheet.title}")
-            label_cell.font = test_label_font
-            label_cell.fill = test_label_fill
-            label_cell.alignment = test_label_alignment
-            target_sheet.row_dimensions[current_row_right].height = 20
-            
-            # Merge label across Collaudo section
-            try:
-                target_sheet.merge_cells(start_row=current_row_right, start_column=right_col_start, end_row=current_row_right, end_column=right_col_start + max_collaudo_cols - 1)
-            except:
-                pass
-            
-            current_row_right += 1
-            
-            # Copy sheet content
-            self._copy_sheet_content_to_position(source_sheet, target_sheet, current_row_right, right_col_start)
-            
-            # Update current row
-            rows_copied = source_sheet.max_row or 20
-            current_row_right += rows_copied + 3
-        
-        # Set print settings
-        try:
-            target_sheet.page_setup.orientation = target_sheet.ORIENTATION_LANDSCAPE
-            target_sheet.page_setup.paperSize = target_sheet.PAPERSIZE_A4
-            target_sheet.page_setup.fitToPage = True
-            target_sheet.page_setup.fitToHeight = 0  # Fit to width only
-            target_sheet.page_setup.fitToWidth = 1
-        except:
-            pass
-        
-        # Close source workbooks
-        for wb in workbooks_to_close:
-            try:
-                wb.close()
-            except:
-                pass
-        
-        self.logger.info(f"Created sheet '{sheet_name}' with {len(all_scheda_data)} Scheda and {len(all_collaudo_data)} Collaudo sheets")
-    
-    def _copy_sheet_content_to_position(
-        self,
-        source_sheet: 'openpyxl.worksheet.worksheet.Worksheet',
-        target_sheet: 'openpyxl.worksheet.worksheet.Worksheet',
-        start_row: int,
-        start_col: int
-    ) -> None:
-        """Copy worksheet content to a specific position in target sheet with full formatting and formulas."""
-        from copy import copy as copy_obj, deepcopy
-        import openpyxl.styles
-        from openpyxl.styles import Color, PatternFill, Border, Side, Font, Alignment, Protection
-        
-        # Copy column widths (offset by start_col)
-        for col_letter, col_dim in source_sheet.column_dimensions.items():
-            try:
-                col_idx = openpyxl.utils.column_index_from_string(col_letter)
-                target_col_letter = openpyxl.utils.get_column_letter(col_idx + start_col - 1)
-                target_sheet.column_dimensions[target_col_letter].width = col_dim.width
-                # Copy hidden state
-                if col_dim.hidden:
-                    target_sheet.column_dimensions[target_col_letter].hidden = True
-            except Exception as e:
-                self.logger.debug(f"Column dimension copy failed: {e}")
-        
-        # Copy row heights and hidden states (offset by start_row)
-        for row_num, row_dim in source_sheet.row_dimensions.items():
-            try:
-                target_sheet.row_dimensions[row_num + start_row - 1].height = row_dim.height
-                if row_dim.hidden:
-                    target_sheet.row_dimensions[row_num + start_row - 1].hidden = True
-            except Exception as e:
-                self.logger.debug(f"Row dimension copy failed: {e}")
-        
-        # Copy cells with FULL formatting and formulas
-        for row in source_sheet.iter_rows():
-            for source_cell in row:
-                if source_cell.row is None or source_cell.column is None:
-                    continue
-                
-                target_row = source_cell.row + start_row - 1
-                target_col = source_cell.column + start_col - 1
-                target_cell = target_sheet.cell(row=target_row, column=target_col)
-                
-                # Copy cell value based on type
-                try:
-                    if source_cell.data_type == 'f':  # Formula
-                        target_cell.value = source_cell.value
-                        target_cell.data_type = 'f'
-                    else:
-                        target_cell.value = source_cell.value
-                        if source_cell.data_type:
-                            target_cell.data_type = source_cell.data_type
-                except Exception as e:
-                    self.logger.debug(f"Value copy failed for {source_cell.coordinate}: {e}")
-                    try:
-                        target_cell.value = source_cell.value
-                    except:
-                        pass
-                
-                # Copy ALL formatting attributes - use direct assignment
-                if source_cell.has_style:
-                    try:
-                        # Direct copy approach - more reliable than copy()
-                        target_cell._style = source_cell._style
-                        
-                    except Exception as e:
-                        # Fallback: manual attribute copy
-                        try:
-                            if source_cell.font:
-                                target_cell.font = source_cell.font
-                            if source_cell.fill:
-                                target_cell.fill = source_cell.fill
-                            if source_cell.border:
-                                target_cell.border = source_cell.border
-                            if source_cell.number_format:
-                                target_cell.number_format = source_cell.number_format
-                            if source_cell.alignment:
-                                target_cell.alignment = source_cell.alignment
-                            if source_cell.protection:
-                                target_cell.protection = source_cell.protection
-                        except Exception as e2:
-                            self.logger.debug(f"Style copy failed for {source_cell.coordinate}: {e2}")
-        
+
+        return None
         # Copy merged cells (adjust coordinates)
-        for merged_range in source_sheet.merged_cells.ranges:
-            min_row = merged_range.min_row + start_row - 1
-            max_row = merged_range.max_row + start_row - 1
-            min_col = merged_range.min_col + start_col - 1
-            max_col = merged_range.max_col + start_col - 1
-            
-            try:
-                target_sheet.merge_cells(
-                    start_row=min_row,
-                    start_column=min_col,
-                    end_row=max_row,
-                    end_column=max_col
-                )
-            except Exception as e:
-                self.logger.debug(f"Merge failed for range {merged_range}: {e}")
-        
-        # Copy conditional formatting (if any)
-        try:
-            if hasattr(source_sheet, 'conditional_formatting') and source_sheet.conditional_formatting:
-                for cf_range, cf_rules in source_sheet.conditional_formatting._cf_rules.items():
-                    # Adjust range for offset
-                    # Note: This is complex and may not work perfectly for all cases
-                    pass
-        except Exception as e:
-            self.logger.debug(f"Conditional formatting copy skipped: {e}")
 

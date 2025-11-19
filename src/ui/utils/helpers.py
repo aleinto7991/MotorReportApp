@@ -7,6 +7,21 @@ from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
+ColorResolver = Optional[Callable[[str, str], Optional[str]]]
+
+
+def _resolve_color(resolver: ColorResolver, token: str, fallback: str) -> str:
+    """Best-effort wrapper that defers to a theme-aware color resolver."""
+
+    if callable(resolver):
+        try:
+            resolved = resolver(token, fallback)
+            if resolved:
+                return resolved
+        except Exception as exc:
+            logger.debug("Color resolver failed for token '%s': %s", token, exc)
+    return fallback
+
 
 # NOTE: StatusManager has been moved to src/gui/core/status_manager.py
 # for architectural consistency with other managers (StateManager, WorkflowManager, etc.)
@@ -20,12 +35,21 @@ class SearchResultsFormatter:
     """Formats and displays search results with SAP code pagination"""
     
     @staticmethod
-    def format_results(tests: list, on_test_selected: Callable, on_row_clicked: Callable, 
-                      selected_tests: Optional[dict] = None, sap_navigator=None) -> list:
+    def format_results(
+        tests: list,
+        on_test_selected: Callable,
+        on_row_clicked: Callable,
+        selected_tests: Optional[dict] = None,
+        sap_navigator=None,
+        color_resolver: ColorResolver = None,
+    ) -> list:
         """Format tests with SAP code pagination - show one SAP at a time."""
+
+        color = lambda token, fallback: _resolve_color(color_resolver, token, fallback)
+        muted = color('text_muted', 'grey')
         if not tests:
             return [ft.Container(
-                content=ft.Text("No results to display.", color="grey"),
+                content=ft.Text("No results to display.", color=muted),
                 alignment=ft.alignment.center,
                 padding=20
             )]
@@ -52,7 +76,7 @@ class SearchResultsFormatter:
         
         if not current_sap_tests:
             return [ft.Container(
-                content=ft.Text("No tests for current SAP selection.", color="grey"),
+                content=ft.Text("No tests for current SAP selection.", color=muted),
                 alignment=ft.alignment.center,
                 padding=20
             )]
@@ -63,12 +87,16 @@ class SearchResultsFormatter:
         current_sap = current_sap_tests[0].sap_code if current_sap_tests else "Unknown SAP"
         
         # SAP Code Header with summary and navigation info
+        primary = color('primary', 'blue')
         sap_header = ft.Container(
             content=ft.Row([
-                ft.Icon(ft.Icons.INVENTORY, size=16, color="blue"),
-                ft.Text(f"SAP Code: {current_sap}", weight=ft.FontWeight.BOLD, size=14, color="blue"),
-                ft.Text(f"({len(current_sap_tests)} test{'s' if len(current_sap_tests) != 1 else ''})", 
-                        size=12, color="grey"),
+                ft.Icon(ft.Icons.INVENTORY, size=16, color=primary),
+                ft.Text(f"SAP Code: {current_sap}", weight=ft.FontWeight.BOLD, size=14, color=primary),
+                ft.Text(
+                    f"({len(current_sap_tests)} test{'s' if len(current_sap_tests) != 1 else ''})",
+                    size=12,
+                    color=muted
+                ),
                 ft.Container(expand=True),  # Spacer
                 ft.IconButton(
                     icon=ft.Icons.SELECT_ALL,
@@ -77,46 +105,51 @@ class SearchResultsFormatter:
                     on_click=lambda e, tests=current_sap_tests: SearchResultsFormatter._select_all_tests(e, tests, on_test_selected)
                 ),
             ], spacing=5),
-            bgcolor="#e8f4f8",
+            bgcolor=color('primary_container', '#e8f4f8'),
             padding=ft.padding.all(12),
             border_radius=8,
             margin=ft.margin.only(top=10, bottom=5),
-            border=ft.border.all(1, "#d0d0d0")
+            border=ft.border.all(1, color('outline', '#d0d0d0'))
         )
         controls.append(sap_header)
         
         # Add column headers with Date prominently displayed
+        header_text_color = color('on_surface', 'darkblue')
         column_header = ft.Container(
             content=ft.Row([
                 ft.Container(width=40),  # Space for checkbox
                 ft.Container(
-                    content=ft.Text("Test Lab", size=11, weight=ft.FontWeight.W_500, color="darkblue"),
+                    content=ft.Text("Test Lab", size=11, weight=ft.FontWeight.W_500, color=header_text_color),
                     width=100
                 ),
                 ft.Container(
-                    content=ft.Text("Date", size=11, weight=ft.FontWeight.W_500, color="darkblue"),
+                    content=ft.Text("Date", size=11, weight=ft.FontWeight.W_500, color=header_text_color),
                     width=120  # Increased width for date
                 ),
                 ft.Container(
-                    content=ft.Text("Voltage", size=11, weight=ft.FontWeight.W_500, color="darkblue"),
+                    content=ft.Text("Voltage", size=11, weight=ft.FontWeight.W_500, color=header_text_color),
                     width=80
                 ),
                 ft.Container(
-                    content=ft.Text("Notes", size=11, weight=ft.FontWeight.W_500, color="darkblue"),
+                    content=ft.Text("Notes", size=11, weight=ft.FontWeight.W_500, color=header_text_color),
                     expand=True,
                     padding=ft.padding.only(right=10)
                 ),
             ], alignment=ft.MainAxisAlignment.START),
-            bgcolor="#f0f7ff",
+            bgcolor=color('surface_variant', '#f0f7ff'),
             padding=ft.padding.symmetric(horizontal=15, vertical=5),
             border_radius=3,
-            border=ft.border.all(1, "#d0d0d0")
+            border=ft.border.all(1, color('outline', '#d0d0d0'))
         )
         controls.append(column_header)
         
         # Show tests for current SAP only
         test_rows = SearchResultsFormatter._create_test_rows(
-            current_sap_tests, on_test_selected, on_row_clicked, selected_tests
+            current_sap_tests,
+            on_test_selected,
+            on_row_clicked,
+            selected_tests,
+            color_resolver=color_resolver,
         )
         
         # Create container for current SAP group
@@ -124,9 +157,9 @@ class SearchResultsFormatter:
             content=ft.Column(test_rows, spacing=2),
             margin=ft.margin.only(left=10, right=10, bottom=10),
             padding=ft.padding.all(8),
-            bgcolor="#fafafa",
+            bgcolor=color('surface_variant', '#fafafa'),
             border_radius=5,
-            border=ft.border.all(1, "#e0e0e0")
+            border=ft.border.all(1, color('outline', '#e0e0e0'))
         )
         controls.append(test_container)
         
@@ -152,11 +185,24 @@ class SearchResultsFormatter:
             on_test_selected(mock_event)
 
     @staticmethod
-    def _create_test_rows(tests: list, on_test_selected: Callable, on_row_clicked: Callable, selected_tests: dict) -> list:
+    def _create_test_rows(
+        tests: list,
+        on_test_selected: Callable,
+        on_row_clicked: Callable,
+        selected_tests: dict,
+        *,
+        color_resolver: ColorResolver = None,
+    ) -> list:
         """Create the actual test row controls with enhanced date display."""
+        color = lambda token, fallback: _resolve_color(color_resolver, token, fallback)
+        base_bg = color('surface', '#ffffff')
+        alt_bg = color('surface_variant', '#f8f8f8')
+        border_color = color('outline', '#eeeeee')
+        date_success = color('success', 'darkgreen')
+        date_muted = color('text_muted', 'grey')
         rows = []
         for i, test in enumerate(tests):
-            bg_color = "#ffffff" if i % 2 == 0 else "#f8f8f8"
+            bg_color = base_bg if i % 2 == 0 else alt_bg
             checked = test.test_lab_number in selected_tests
             row_click_handler = on_row_clicked(test)
             if row_click_handler is None:
@@ -188,9 +234,9 @@ class SearchResultsFormatter:
                     ),
                     ft.Container(
                         content=ft.Text(
-                            test_date, 
-                            size=12, 
-                            color="darkgreen" if test_date != "N/A" else "grey",
+                            test_date,
+                            size=12,
+                            color=date_success if test_date != "N/A" else date_muted,
                             weight=ft.FontWeight.W_500 if test_date != "N/A" else ft.FontWeight.NORMAL
                         ),
                         width=120  # Increased width for date display
@@ -217,7 +263,7 @@ class SearchResultsFormatter:
                 border_radius=3,
                 margin=ft.margin.only(bottom=1),
                 on_click=row_click_handler,
-                border=ft.border.all(1, "#eeeeee")
+                border=ft.border.all(1, border_color)
             )
             rows.append(test_row)
         
@@ -260,6 +306,7 @@ class SAPNavigationManager:
     
     def create_navigation_controls(self, update_callback: Callable) -> ft.Container:
         """Create SAP navigation controls with enhanced design"""
+        color = self._color
         current_label = (
             f"Viewing SAP Code {self.current_sap_index + 1} of {len(self.sap_codes)}"
             if self.sap_codes else "No SAP codes available"
@@ -271,16 +318,16 @@ class SAPNavigationManager:
         return ft.Container(
             content=ft.Column([
                 ft.Row([
-                    ft.Icon(ft.Icons.NAVIGATE_BEFORE, color="blue", size=20),
-                    ft.Text(current_label, size=14, weight=ft.FontWeight.W_500, color="blue"),
-                    ft.Icon(ft.Icons.NAVIGATE_NEXT, color="blue", size=20),
+                    ft.Icon(ft.Icons.NAVIGATE_BEFORE, color=color('primary', 'blue'), size=20),
+                    ft.Text(current_label, size=14, weight=ft.FontWeight.W_500, color=color('primary', 'blue')),
+                    ft.Icon(ft.Icons.NAVIGATE_NEXT, color=color('primary', 'blue'), size=20),
                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=5),
                 ft.Row([
                     ft.Text(
                         f"Current: {current_value}",
                         size=16,
                         weight=ft.FontWeight.BOLD,
-                        color="darkblue"
+                        color=color('on_surface', 'darkblue')
                     ),
                 ], alignment=ft.MainAxisAlignment.CENTER),
                 ft.Row([
@@ -305,11 +352,11 @@ class SAPNavigationManager:
                     )
                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=10)
             ], spacing=8),
-            bgcolor="#e3f2fd" if self.sap_codes else "#f0f0f0",
+            bgcolor=color('primary_container', '#e3f2fd') if self.sap_codes else color('surface_variant', '#f0f0f0'),
             padding=ft.padding.all(15),
             border_radius=8,
             margin=ft.margin.only(bottom=15),
-            border=ft.border.all(2, "#1976d2" if self.sap_codes else "#cccccc")
+            border=ft.border.all(2, color('primary', '#1976d2') if self.sap_codes else color('outline', '#cccccc'))
         )
     
     def _navigate_sap(self, delta: int, update_callback: Callable):
@@ -328,4 +375,15 @@ class SAPNavigationManager:
     def reset(self):
         """Reset navigation to first SAP code"""
         self.current_sap_index = 0
+
+    def _color(self, token: str, fallback: str) -> str:
+        """Convenience wrapper that defers to the GUI's theme resolver if present."""
+
+        resolver = getattr(self.gui, "_themed_color", None)
+        if callable(resolver):
+            try:
+                return resolver(token, fallback) or fallback
+            except Exception as exc:
+                logger.debug("SAPNavigationManager color fallback (%s): %s", token, exc)
+        return fallback
 

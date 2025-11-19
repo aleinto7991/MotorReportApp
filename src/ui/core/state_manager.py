@@ -3,11 +3,13 @@ Application State Manager for the Motor Report GUI
 Manages all application state including selected tests, configurations, and workflow state.
 """
 import logging
+import os
 from typing import List, Dict, Set, Optional, Callable, Any
 from dataclasses import dataclass, field
 from ..utils.selection_cache import SelectionCache
 from ...data.models import Test
 from ...services.noise_registry_reader import load_registry_dataframe
+from ...services.carichi_locator import CarichiLocator, CarichiTestInfo
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ class AppState:
     selected_registry_file: str = ""
     selected_noise_folder: str = ""
     selected_noise_registry: str = ""
+    test_lab_directory: str = ""
     
     # SAP selections
     selected_performance_saps: Set[str] = field(default_factory=set)
@@ -67,6 +70,11 @@ class AppState:
     
     # Loaded registry data (to avoid redundant loading)
     noise_registry_dataframe: Optional[Any] = None  # pandas DataFrame
+
+    # Carichi Nominali (Test Lab) tracking
+    carichi_matches: Dict[str, Optional[CarichiTestInfo]] = field(default_factory=dict)
+    carichi_last_checked: Optional[str] = None
+    carichi_errors: List[str] = field(default_factory=list)
     
     # Internal flags
     shutting_down: bool = False
@@ -91,6 +99,9 @@ class StateManager:
         self.state = AppState()
         self._observers: List[Callable] = []
         self.selection_cache = SelectionCache()
+        self._carichi_locator: Optional[CarichiLocator] = None
+        self._carichi_locator_path: Optional[str] = None
+        self._carichi_lookup_signature: Optional[tuple[str, tuple[str, ...]]] = None
     
     def add_observer(self, callback):
         """Add a callback to be notified when state changes"""
@@ -171,6 +182,8 @@ class StateManager:
         else:
             self.state.selected_tests.pop(test_id, None)
         
+        self._invalidate_carichi_cache()
+
         # Only notify if there are observers and state actually changed
         if self._observers:
             self.notify_observers("test_selection_changed", {
@@ -329,6 +342,7 @@ class StateManager:
         self.selection_cache.selected_test_labs.clear()
         self.selection_cache.selected_sap_codes.clear()
         self.state.search_selection_applied = False
+        self._invalidate_carichi_cache()
         
         self.notify_observers("search_selection_cleared")
 
@@ -391,7 +405,8 @@ class StateManager:
         })
     
     def update_paths(self, tests_folder: Optional[str] = None, registry_file: Optional[str] = None, 
-                     noise_folder: Optional[str] = None, noise_registry: Optional[str] = None):
+                     noise_folder: Optional[str] = None, noise_registry: Optional[str] = None,
+                     test_lab_dir: Optional[str] = None):
         """Update file paths"""
         if tests_folder is not None:
             self.state.selected_tests_folder = tests_folder
@@ -401,12 +416,18 @@ class StateManager:
             self.state.selected_noise_folder = noise_folder
         if noise_registry is not None:
             self.state.selected_noise_registry = noise_registry
+        if test_lab_dir is not None:
+            self.state.test_lab_directory = test_lab_dir or ""
+            self._carichi_locator = None
+            self._carichi_locator_path = None
+            self._invalidate_carichi_cache()
         
         self.notify_observers("paths_updated", {
             "tests_folder": self.state.selected_tests_folder,
             "registry_file": self.state.selected_registry_file,
             "noise_folder": self.state.selected_noise_folder,
-            "noise_registry": self.state.selected_noise_registry
+            "noise_registry": self.state.selected_noise_registry,
+            "test_lab_dir": self.state.test_lab_directory
         })
     
     def update_configuration(self, **config):
@@ -544,4 +565,155 @@ class StateManager:
     def is_noise_registry_loaded(self) -> bool:
         """Check if noise registry data is loaded"""
         return self.state.noise_registry_dataframe is not None
+
+    # ------------------------------------------------------------------
+    # Carichi Nominali helpers
+
+    def _invalidate_carichi_cache(self):
+        """Clear cached Carichi lookup results."""
+        self.state.carichi_matches.clear()
+        self.state.carichi_last_checked = None
+        self.state.carichi_errors.clear()
+        self._carichi_lookup_signature = None
+
+    def _build_carichi_signature(self) -> tuple[str, tuple[str, ...]]:
+        """Return a signature representing the current lookup inputs."""
+        base_path = (self.state.test_lab_directory or "").strip()
+        test_ids = tuple(sorted(self.state.selected_tests.keys()))
+        return base_path, test_ids
+
+    def _ensure_carichi_locator(self) -> Optional[CarichiLocator]:
+        """Instantiate (or reuse) a Carichi locator for the current path."""
+        base_path = (self.state.test_lab_directory or "").strip()
+        if not base_path:
+            self._carichi_locator = None
+            self._carichi_locator_path = None
+            return None
+
+        normalized = os.path.normpath(base_path)
+        if self._carichi_locator_path != normalized:
+            self._carichi_locator = CarichiLocator(normalized, log=logger.getChild("CarichiLocator"))
+            self._carichi_locator_path = normalized
+        return self._carichi_locator
+
+    def refresh_carichi_matches(self, force: bool = False) -> Dict[str, Optional[CarichiTestInfo]]:
+        """Refresh cached Carichi lookup results for selected tests."""
+        signature = self._build_carichi_signature()
+        if (not force and self._carichi_lookup_signature == signature and
+                self.state.carichi_matches):
+            return self.state.carichi_matches
+
+        if not self.state.selected_tests:
+            self.state.carichi_matches = {}
+            self.state.carichi_errors = []
+            self.state.carichi_last_checked = None
+            self._carichi_lookup_signature = signature
+            return {}
+
+        base_dir = (self.state.test_lab_directory or "").strip()
+        if not base_dir:
+            self.state.carichi_matches = {}
+            self.state.carichi_errors = ["Test Lab directory not configured."]
+            self.state.carichi_last_checked = None
+            self._carichi_lookup_signature = None
+            return {}
+
+        locator = self._ensure_carichi_locator()
+        if not locator or not locator.available:
+            message = f"Test Lab directory not accessible: {base_dir}"
+            self.state.carichi_matches = {}
+            self.state.carichi_errors = [message]
+            self.state.carichi_last_checked = self._get_timestamp()
+            self._carichi_lookup_signature = signature
+            return {}
+
+        matches: Dict[str, Optional[CarichiTestInfo]] = {}
+        for test_id, test in self.state.selected_tests.items():
+            try:
+                matches[test_id] = locator.find_for_performance_test(test.test_lab_number)
+            except Exception as exc:
+                logger.warning("Carichi lookup failed for %s: %s", test.test_lab_number, exc)
+                matches[test_id] = None
+
+        self.state.carichi_matches = matches
+        self.state.carichi_errors = []
+        self.state.carichi_last_checked = self._get_timestamp()
+        self._carichi_lookup_signature = signature
+
+        resolved = sum(1 for match in matches.values() if match)
+        missing = len(matches) - resolved
+        if self._observers:
+            self.notify_observers("carichi_matches_refreshed", {
+                "resolved": resolved,
+                "missing": missing,
+                "path": base_dir,
+            })
+
+        return matches
+
+    def get_carichi_status(self) -> Dict[str, Any]:
+        """Return a snapshot summary of Carichi lookup coverage."""
+        matches = self.state.carichi_matches or {}
+        selected_tests = self.state.selected_tests
+        
+        # Filter: Only consider tests ending in "A" as relevant for Carichi coverage
+        relevant_tests = {
+            tid: t for tid, t in selected_tests.items() 
+            if t.test_lab_number and t.test_lab_number.strip().upper().endswith("A")
+        }
+        
+        total_tests = len(relevant_tests)
+        
+        # Count resolved only among relevant tests
+        resolved = 0
+        for tid in relevant_tests:
+            if matches.get(tid):
+                resolved += 1
+
+        missing_details: List[Dict[str, str]] = []
+        missing_by_sap: Dict[str, List[str]] = {}
+        year_counts: Dict[str, int] = {}
+
+        for test_id, test in relevant_tests.items():
+            match_info = matches.get(test_id)
+            if match_info and match_info.year_folder:
+                year_counts[match_info.year_folder] = year_counts.get(match_info.year_folder, 0) + 1
+
+            if not match_info:
+                sap_code = test.sap_code or "UNKNOWN"
+                missing_details.append({
+                    "test_number": test.test_lab_number,
+                    "sap_code": sap_code,
+                })
+                missing_by_sap.setdefault(sap_code, []).append(test.test_lab_number)
+
+        coverage_percent = 0.0
+        if total_tests:
+            coverage_percent = round((resolved / total_tests) * 100, 1)
+        elif not relevant_tests and not selected_tests:
+             # No tests selected at all
+             coverage_percent = 0.0
+        elif not relevant_tests and selected_tests:
+             # Tests selected, but none are "A" tests -> effectively 100% (nothing missing) or N/A
+             # Let's treat it as 100% to avoid showing errors
+             coverage_percent = 100.0
+
+        locator = self._ensure_carichi_locator() if self.state.test_lab_directory else None
+        available = bool(locator and locator.available)
+
+        return {
+            "enabled": bool(self.state.test_lab_directory),
+            "path": self.state.test_lab_directory,
+            "available": available,
+            "total_tests": total_tests,
+            "resolved_count": resolved,
+            "missing_count": len(missing_details),
+            "missing_details": missing_details,
+            "missing_by_sap": missing_by_sap,
+            "year_counts": year_counts,
+            "last_checked": self.state.carichi_last_checked,
+            "errors": list(self.state.carichi_errors),
+            "coverage_percent": coverage_percent,
+            "matches": matches,
+        }
 

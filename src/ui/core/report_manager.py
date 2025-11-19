@@ -8,6 +8,7 @@ from typing import List, Optional, TYPE_CHECKING
 from pathlib import Path
 from ...data.models import Test
 from ...config.app_config import AppConfig
+from ...config.directory_config import LOGO_PATH
 
 if TYPE_CHECKING:
     from ..main_gui import MotorReportAppGUI
@@ -54,13 +55,20 @@ class ReportManager:
             logger.info(f"📊 selected_lf_saps: {self.state.state.selected_lf_saps}")
             logger.info("=" * 60)
             
+            logo_path = None
+            if LOGO_PATH:
+                logo_candidate = Path(LOGO_PATH)
+                if logo_candidate.exists():
+                    logo_path = str(logo_candidate)
+
             config = AppConfig(
                 tests_folder=self.state.state.selected_tests_folder,
                 registry_path=self.state.state.selected_registry_file,
                 output_path=".",
-                logo_path=None,  # Will be detected automatically
+                logo_path=logo_path,
                 noise_registry_path=self.state.state.selected_noise_registry,
                 noise_dir=self.state.state.selected_noise_folder,
+                test_lab_root=self.state.state.test_lab_directory or None,
                 pressure_unit=self.state.state.pressure_unit,
                 flow_unit=self.state.state.flow_unit,
                 speed_unit=self.state.state.speed_unit,
@@ -116,13 +124,20 @@ class ReportManager:
                     logger.info(f"   📌 SAP {sap}: {len(tests)} test(s) - {tests}")
             logger.info("=" * 60)
             
+            logo_path = None
+            if LOGO_PATH:
+                logo_candidate = Path(LOGO_PATH)
+                if logo_candidate.exists():
+                    logo_path = str(logo_candidate)
+
             new_config = AppConfig(
                 tests_folder=self.state.state.selected_tests_folder,
                 registry_path=self.state.state.selected_registry_file,
                 output_path=".",
-                logo_path=None,  # Will be detected automatically
+                logo_path=logo_path,
                 noise_registry_path=self.state.state.selected_noise_registry,
                 noise_dir=self.state.state.selected_noise_folder,
+                test_lab_root=self.state.state.test_lab_directory or None,
                 include_noise=self.state.state.include_noise,
                 include_comparison=self.state.state.include_comparison,
                 registry_sheet_name=self.state.state.registry_sheet_name,
@@ -209,6 +224,7 @@ class ReportManager:
             self.gui.app.config.flow_unit = self.state.state.flow_unit
             self.gui.app.config.speed_unit = self.state.state.speed_unit
             self.gui.app.config.power_unit = self.state.state.power_unit
+            self.gui.app.config.test_lab_root = self.state.state.test_lab_directory or None
             
             # Update progress
             self.gui.status_manager.update_status(

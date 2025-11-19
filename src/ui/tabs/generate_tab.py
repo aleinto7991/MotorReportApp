@@ -20,6 +20,11 @@ class GenerateTab(BaseTab):
         super().__init__(parent_gui)
         self.tab_name = "4. Generate"
         self.tab_icon = ft.Icons.CREATE
+
+    def _color(self, token: str, fallback: str) -> str:
+        """Shorthand for resolving themed colors with safe fallbacks."""
+
+        return self.theme_color(token, fallback)
     
     def get_tab_content(self) -> ft.Control:
         """Build the generation tab content"""
@@ -40,11 +45,20 @@ class GenerateTab(BaseTab):
                 # Always create fresh summary container to avoid reference issues
             self.summary_container = ft.Container(
                 content=ft.Column([
-                    ft.Text("Selected Tests Summary:", weight=ft.FontWeight.W_500, size=16),
+                    ft.Text(
+                        "Selected Tests Summary:",
+                        weight=ft.FontWeight.W_500,
+                        size=16,
+                        color=self._color('on_surface', '#1f2933')
+                    ),
                     self._build_tests_summary(),
                 ], spacing=10),
                 visible=True,
-                expand=False
+                expand=False,
+                bgcolor=self._color('surface', '#ffffff'),
+                border_radius=8,
+                border=ft.border.all(1, self._color('outline', '#d0d7e5')),
+                padding=ft.padding.all(12)
             )
             
             logger.info("✅ Generate tab content built successfully")
@@ -53,11 +67,19 @@ class GenerateTab(BaseTab):
             # Return a simple error content instead of failing
             self.summary_container = ft.Container(
                 content=ft.Column([
-                    ft.Text("Error loading content", weight=ft.FontWeight.W_500, size=16, color="red"),
-                    ft.Text(f"Error: {str(e)}", size=12, color="grey"),
+                    ft.Text(
+                        "Error loading content",
+                        weight=ft.FontWeight.W_500,
+                        size=16,
+                        color=self._color('error', '#c62828')
+                    ),
+                    ft.Text(f"Error: {str(e)}", size=12, color=self._color('text_muted', '#5f6b7a')),
                 ], spacing=10),
                 visible=True,
-                expand=False
+                expand=False,
+                bgcolor=self._color('error_container', '#ffebee'),
+                border_radius=8,
+                padding=ft.padding.all(12)
             )
         
         return ft.Container(
@@ -70,8 +92,11 @@ class GenerateTab(BaseTab):
                     step4_status or ft.Container(),
                 ], spacing=10),
                 
-                ft.Text("Generate your motor performance report with the selected tests and configuration.", 
-                       color="grey", size=14),
+                ft.Text(
+                    "Generate your motor performance report with the selected tests and configuration.", 
+                    color=self._color('text_muted', '#5f6b7a'),
+                    size=14
+                ),
                 ft.Divider(),
                 
                 self.summary_container,
@@ -81,13 +106,17 @@ class GenerateTab(BaseTab):
                 
                 ft.Container(
                     content=ft.Row([
-                        ft.Icon(ft.Icons.WARNING, color="orange"),
-                        ft.Text("Make sure all previous steps are completed before generating the report.", 
-                               color="orange", size=14)
+                        ft.Icon(ft.Icons.WARNING, color=self._color('warning', '#f57c00')),
+                        ft.Text(
+                            "Make sure all previous steps are completed before generating the report.", 
+                            color=self._color('warning', '#f57c00'),
+                            size=14
+                        )
                     ], spacing=10),
                     padding=ft.padding.all(15),
-                    bgcolor="#fff3e0",
-                    border_radius=5
+                    bgcolor=self._color('warning_container', '#fff3e0'),
+                    border_radius=5,
+                    border=ft.border.all(1, self._color('outline', '#ffcc80'))
                 )
             ], spacing=15),
             padding=ft.padding.all(20),
@@ -99,9 +128,11 @@ class GenerateTab(BaseTab):
         """Build the selected tests summary display with interactive controls"""
         if not self.parent_gui or not hasattr(self.parent_gui, 'state_manager'):
             logger.warning("🔍 _build_tests_summary: No state manager found")
-            return ft.Text("❌ No state manager found", color="red", size=18)
+            return ft.Text("❌ No state manager found", color=self._color('error', '#c62828'), size=18)
 
-        state = self.parent_gui.state_manager.state
+        state_manager = self.parent_gui.state_manager
+        state = state_manager.state
+        state_manager.refresh_carichi_matches()
         selected_tests = state.selected_tests
 
         logger.info(f"🔍 GenerateTab Debug - selected_tests count: {len(selected_tests)}")
@@ -112,12 +143,22 @@ class GenerateTab(BaseTab):
 
         if not selected_tests:
             logger.warning("🔍 _build_tests_summary: No selected tests found")
-            return ft.Text("⚠️ No tests selected yet. Go to Search & Select tab and select tests.", color="orange", size=16)
+            return ft.Text(
+                "⚠️ No tests selected yet. Go to Search & Select tab and select tests.",
+                color=self._color('warning', '#f57c00'),
+                size=16
+            )
 
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        header = ft.Text(f"🔄 Last Updated: {timestamp}", size=14, color="green", weight=ft.FontWeight.BOLD)
+        header = ft.Text(
+            f"🔄 Last Updated: {timestamp}",
+            size=14,
+            color=self._color('success', '#2e7d32'),
+            weight=ft.FontWeight.BOLD
+        )
 
         performance_section = self._build_performance_summary_section(state)
+        carichi_section = self._build_carichi_summary_section(state)
         noise_section = self._build_noise_summary_section(state)
         lf_section = self._build_lf_summary_section(state)
         comparison_section = self._build_comparison_summary_section(state)
@@ -127,6 +168,7 @@ class GenerateTab(BaseTab):
             controls=[
                 header,
                 performance_section,
+                carichi_section,
                 noise_section,
                 lf_section,
                 comparison_section,
@@ -151,12 +193,12 @@ class GenerateTab(BaseTab):
                     ft.Text(
                         f"{sap_code}: {len(tests_for_sap)} test(s)",
                         size=13,
-                        color="darkblue",
+                        color=self._color('primary', '#0f4c81'),
                         weight=ft.FontWeight.W_500,
                     ),
                     ft.IconButton(
                         icon=ft.Icons.DELETE_FOREVER,
-                        icon_color="#d32f2f",
+                        icon_color=self._color('error', '#d32f2f'),
                         tooltip=f"Remove all tests for SAP {sap_code}",
                         on_click=lambda e, sap=sap_code: self._handle_remove_performance_sap(sap),
                     ),
@@ -177,11 +219,11 @@ class GenerateTab(BaseTab):
                             ft.Text(
                                 f"• Test {test.test_lab_number}: {voltage_display} | {notes_display}",
                                 size=12,
-                                color="darkblue",
+                                color=self._color('on_surface', '#1f2933'),
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.CANCEL,
-                                icon_color="#f44336",
+                                icon_color=self._color('error', '#f44336'),
                                 tooltip=f"Remove test {test.test_lab_number}",
                                 on_click=lambda e, test_id=test.test_lab_number: self._handle_remove_performance_test(test_id),
                             ),
@@ -190,31 +232,209 @@ class GenerateTab(BaseTab):
                     )
                 )
 
-            sap_container = ft.Container(
-                content=ft.Column(controls=[sap_header, *test_rows], spacing=3),
-                padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                bgcolor="#f0f4ff",
-                border_radius=6,
+            sap_rows.append(
+                ft.Container(
+                    content=ft.Column(controls=[sap_header, *test_rows], spacing=3),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                    bgcolor=self._color('surface_variant', '#f0f4ff'),
+                    border_radius=6,
+                    border=ft.border.all(1, self._color('outline', '#d0d7e5')),
+                )
             )
-            sap_rows.append(sap_container)
 
         return ft.Container(
             content=ft.Column(
                 controls=[
-                    ft.Text("📊 PERFORMANCE SHEET", size=18, color="blue", weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        "📊 PERFORMANCE SHEET",
+                        size=18,
+                        color=self._color('primary', '#1565c0'),
+                        weight=ft.FontWeight.BOLD
+                    ),
                     ft.Text(
                         f"All {len(selected_tests)} selected tests from Step 1 will be included",
                         size=14,
-                        color="darkgreen",
+                        color=self._color('success', '#2e7d32'),
                     ),
                     *sap_rows,
                 ],
                 spacing=6,
             ),
             padding=ft.padding.all(10),
-            bgcolor="#e3f2fd",
+            bgcolor=self._color('primary_container', '#e3f2fd'),
             border_radius=8,
-            border=ft.border.all(1, "#90caf9"),
+            border=ft.border.all(1, self._color('outline', '#90caf9')),
+        )
+
+    def _build_carichi_summary_section(self, state) -> ft.Control:
+        state_manager = getattr(self.parent_gui, 'state_manager', None)
+        if not state_manager:
+            return ft.Container(
+                content=ft.Text(
+                    "Carichi precheck unavailable - no state manager",
+                    color=self._color('error', '#c62828'),
+                    size=14,
+                ),
+                padding=ft.padding.all(10),
+                bgcolor=self._color('error_container', '#ffebee'),
+                border_radius=8,
+            )
+
+        status = state_manager.get_carichi_status()
+        accent = self._color('tertiary', '#6a1b9a')
+        container_bg = self._color('tertiary_container', '#f3e5f5')
+        muted = self._color('text_muted', '#5f6b7a')
+
+        header = ft.Text(
+            "⚙️ CARICHI NOMINALI PRECHECK",
+            size=18,
+            color=accent,
+            weight=ft.FontWeight.BOLD,
+        )
+
+        if not status.get('enabled'):
+            return ft.Container(
+                content=ft.Column(
+                    controls=[
+                        header,
+                        ft.Text(
+                            "Configure the Test Lab directory in the Setup tab to enable Carichi precheck.",
+                            size=14,
+                            color=muted,
+                        ),
+                    ],
+                    spacing=6,
+                ),
+                padding=ft.padding.all(10),
+                bgcolor=container_bg,
+                border_radius=8,
+                border=ft.border.all(1, self._color('outline', '#ce93d8')),
+            )
+
+        path_text = ft.Text(
+            f"Directory: {status.get('path') or 'Not set'}",
+            size=12,
+            color=muted,
+            selectable=True,
+        )
+
+        if status.get('errors'):
+            error_controls = [
+                ft.Text(
+                    f"❌ {message}",
+                    size=13,
+                    color=self._color('error', '#c62828'),
+                )
+                for message in status['errors']
+            ]
+
+            return ft.Container(
+                content=ft.Column(
+                    controls=[header, path_text, *error_controls],
+                    spacing=6,
+                ),
+                padding=ft.padding.all(10),
+                bgcolor=self._color('error_container', '#ffebee'),
+                border_radius=8,
+                border=ft.border.all(1, self._color('outline', '#ffcdd2')),
+            )
+
+        total_tests = status.get('total_tests', 0)
+        coverage_line = ft.Text(
+            f"Coverage: {status.get('resolved_count', 0)}/{total_tests} test(s) ({status.get('coverage_percent', 0.0)}%)",
+            size=14,
+            color=accent,
+            weight=ft.FontWeight.W_500,
+        )
+
+        last_checked_display = None
+        last_checked = status.get('last_checked')
+        if last_checked:
+            try:
+                checked_dt = datetime.datetime.fromisoformat(last_checked)
+                last_checked_display = checked_dt.strftime("%H:%M:%S")
+            except ValueError:
+                last_checked_display = last_checked
+
+        info_controls: List[ft.Control] = [header, path_text]
+
+        if total_tests == 0:
+            info_controls.append(
+                ft.Text(
+                    "No performance tests selected yet. Carichi files will be resolved after Step 1.",
+                    size=14,
+                    color=muted,
+                )
+            )
+        else:
+            info_controls.append(coverage_line)
+
+            if last_checked_display:
+                info_controls.append(
+                    ft.Text(
+                        f"Last checked: {last_checked_display}",
+                        size=12,
+                        color=muted,
+                    )
+                )
+
+            year_counts = status.get('year_counts') or {}
+            if year_counts:
+                year_summary = ", ".join(
+                    f"{year}: {count}"
+                    for year, count in sorted(year_counts.items(), reverse=True)
+                )
+                info_controls.append(
+                    ft.Text(
+                        f"Year folders: {year_summary}",
+                        size=12,
+                        color=muted,
+                    )
+                )
+
+            missing_details = status.get('missing_details') or []
+            if missing_details:
+                info_controls.append(
+                    ft.Text(
+                        "Missing workbook(s):",
+                        size=13,
+                        color=self._color('error', '#c62828'),
+                        weight=ft.FontWeight.W_500,
+                    )
+                )
+                max_rows = 5
+                for entry in missing_details[:max_rows]:
+                    info_controls.append(
+                        ft.Text(
+                            f"• {entry.get('test_number')} ({entry.get('sap_code')})",
+                            size=12,
+                            color=self._color('error', '#c62828'),
+                        )
+                    )
+                if len(missing_details) > max_rows:
+                    info_controls.append(
+                        ft.Text(
+                            f"…and {len(missing_details) - max_rows} more",
+                            size=12,
+                            color=self._color('error', '#c62828'),
+                        )
+                    )
+            else:
+                info_controls.append(
+                    ft.Text(
+                        "✅ All selected tests have Carichi workbook matches",
+                        size=14,
+                        color=self._color('success', '#2e7d32'),
+                        weight=ft.FontWeight.W_500,
+                    )
+                )
+
+        return ft.Container(
+            content=ft.Column(controls=info_controls, spacing=6),
+            padding=ft.padding.all(10),
+            bgcolor=container_bg,
+            border_radius=8,
+            border=ft.border.all(1, self._color('outline', '#ce93d8')),
         )
 
     def _build_noise_summary_section(self, state) -> ft.Control:
@@ -222,15 +442,24 @@ class GenerateTab(BaseTab):
             return ft.Container(
                 content=ft.Column(
                     controls=[
-                        ft.Text("🔊 NOISE ANALYSIS", size=18, color="green", weight=ft.FontWeight.BOLD),
-                        ft.Text("Noise analysis disabled in configuration", size=14, color="grey"),
+                        ft.Text(
+                            "🔊 NOISE ANALYSIS",
+                            size=18,
+                            color=self._color('success', '#2e7d32'),
+                            weight=ft.FontWeight.BOLD
+                        ),
+                        ft.Text(
+                            "Noise analysis disabled in configuration",
+                            size=14,
+                            color=self._color('text_muted', '#5f6b7a')
+                        ),
                     ],
                     spacing=6,
                 ),
                 padding=ft.padding.all(10),
-                bgcolor="#f5f5f5",
+                bgcolor=self._color('surface_variant', '#f5f5f5'),
                 border_radius=8,
-                border=ft.border.all(1, "#e0e0e0"),
+                border=ft.border.all(1, self._color('outline', '#e0e0e0')),
             )
 
         sap_rows: List[ft.Control] = []
@@ -242,12 +471,12 @@ class GenerateTab(BaseTab):
                     ft.Text(
                         f"{sap_code}: {len(test_labs)} noise test(s)",
                         size=13,
-                        color="darkgreen",
+                        color=self._color('success', '#2e7d32'),
                         weight=ft.FontWeight.W_500,
                     ),
                     ft.IconButton(
                         icon=ft.Icons.DELETE_FOREVER,
-                        icon_color="#2e7d32",
+                        icon_color=self._color('error', '#c62828'),
                         tooltip=f"Remove SAP {sap_code} from noise analysis",
                         on_click=lambda e, sap=sap_code: self._handle_remove_noise_sap(sap),
                     ),
@@ -259,10 +488,10 @@ class GenerateTab(BaseTab):
                 test_rows = [
                     ft.Row(
                         controls=[
-                            ft.Text(f"• Test {lab}", size=12, color="darkgreen"),
+                            ft.Text(f"• Test {lab}", size=12, color=self._color('on_surface', '#1f2933')),
                             ft.IconButton(
                                 icon=ft.Icons.CANCEL,
-                                icon_color="#43a047",
+                                icon_color=self._color('error', '#d32f2f'),
                                 tooltip=f"Remove noise test {lab}",
                                 on_click=lambda e, sap=sap_code, lab=lab: self._handle_remove_noise_test(sap, lab),
                             ),
@@ -272,13 +501,13 @@ class GenerateTab(BaseTab):
                     for lab in test_labs
                 ]
             else:
-                test_rows = [ft.Text("• No noise tests selected", size=12, color="orange")]
+                test_rows = [ft.Text("• No noise tests selected", size=12, color=self._color('warning', '#f57c00'))]
 
             sap_rows.append(
                 ft.Container(
                     content=ft.Column(controls=[sap_header, *test_rows], spacing=3),
                     padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                    bgcolor="#e8f5e9",
+                    bgcolor=self._color('success_container', '#e8f5e9'),
                     border_radius=6,
                 )
             )
@@ -287,25 +516,34 @@ class GenerateTab(BaseTab):
             ft.Text(
                 f"✅ Noise analysis enabled for {len(state.selected_noise_saps)} SAP code(s)",
                 size=14,
-                color="darkgreen",
+                color=self._color('success', '#2e7d32'),
             )
             if state.selected_noise_saps
-            else ft.Text("⚠️ No SAP codes selected for noise analysis", size=14, color="orange")
+            else ft.Text(
+                "⚠️ No SAP codes selected for noise analysis",
+                size=14,
+                color=self._color('warning', '#f57c00')
+            )
         )
 
         return ft.Container(
             content=ft.Column(
                 controls=[
-                    ft.Text("🔊 NOISE ANALYSIS", size=18, color="green", weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        "🔊 NOISE ANALYSIS",
+                        size=18,
+                        color=self._color('success', '#2e7d32'),
+                        weight=ft.FontWeight.BOLD
+                    ),
                     info_text,
                     *sap_rows,
                 ],
                 spacing=6,
             ),
             padding=ft.padding.all(10),
-            bgcolor="#e8f5e8",
+            bgcolor=self._color('success_container', '#e8f5e8'),
             border_radius=8,
-            border=ft.border.all(1, "#a5d6a7"),
+            border=ft.border.all(1, self._color('outline', '#a5d6a7')),
         )
 
     def _build_lf_summary_section(self, state) -> ft.Control:
@@ -315,15 +553,24 @@ class GenerateTab(BaseTab):
             return ft.Container(
                 content=ft.Column(
                     controls=[
-                        ft.Text("🔬 LIFE TEST (LF) DATA", size=18, color="#1976d2", weight=ft.FontWeight.BOLD),
-                        ft.Text("⚠️ No LF tests selected", size=14, color="orange"),
+                        ft.Text(
+                            "🔬 LIFE TEST (LF) DATA",
+                            size=18,
+                            color=self._color('primary', '#1976d2'),
+                            weight=ft.FontWeight.BOLD
+                        ),
+                        ft.Text(
+                            "⚠️ No LF tests selected",
+                            size=14,
+                            color=self._color('warning', '#f57c00')
+                        ),
                     ],
                     spacing=6,
                 ),
                 padding=ft.padding.all(10),
-                bgcolor="#e3f2fd",
+                bgcolor=self._color('primary_container', '#e3f2fd'),
                 border_radius=8,
-                border=ft.border.all(1, "#90caf9"),
+                border=ft.border.all(1, self._color('outline', '#90caf9')),
             )
         
         # Build list of selected LF tests
@@ -340,7 +587,7 @@ class GenerateTab(BaseTab):
                 f"SAP {sap_code}: {len(test_numbers)} LF test(s)",
                 size=14,
                 weight=ft.FontWeight.BOLD,
-                color="#1565c0",
+                color=self._color('primary', '#1565c0'),
             )
             
             # Create rows for each test
@@ -351,7 +598,7 @@ class GenerateTab(BaseTab):
                         ft.IconButton(
                             icon=ft.Icons.REMOVE_CIRCLE_OUTLINE,
                             icon_size=16,
-                            icon_color="red",
+                            icon_color=self._color('error', '#c62828'),
                             tooltip=f"Remove LF test {test_num}",
                             on_click=lambda e, s=sap_code, t=test_num: self._remove_lf_test(s, t),
                         ),
@@ -365,7 +612,7 @@ class GenerateTab(BaseTab):
                 ft.Container(
                     content=ft.Column(controls=[sap_header, *test_rows], spacing=3),
                     padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                    bgcolor="#e3f2fd",
+                    bgcolor=self._color('primary_container', '#e3f2fd'),
                     border_radius=6,
                 )
             )
@@ -373,22 +620,28 @@ class GenerateTab(BaseTab):
         info_text = ft.Text(
             f"✅ {total_tests} LF test(s) selected across {len(state.selected_lf_test_numbers)} SAP code(s)",
             size=14,
-            color="#1565c0",
+            color=self._color('primary', '#1565c0'),
         )
         
         return ft.Container(
             content=ft.Column(
                 controls=[
-                    ft.Text("🔬 LIFE TEST (LF) DATA", size=18, color="#1976d2", weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        "🔬 LIFE TEST (LF) DATA",
+                        size=18,
+                        color=self._color('primary', '#1976d2'),
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    
                     info_text,
                     *sap_rows,
                 ],
                 spacing=6,
             ),
             padding=ft.padding.all(10),
-            bgcolor="#e3f2fd",
+            bgcolor=self._color('primary_container', '#e3f2fd'),
             border_radius=8,
-            border=ft.border.all(1, "#90caf9"),
+            border=ft.border.all(1, self._color('outline', '#90caf9')),
         )
     
     def _remove_lf_test(self, sap_code: str, test_number: str):
@@ -423,12 +676,12 @@ class GenerateTab(BaseTab):
                         ft.Text(
                             f"{group_id}: {sum(len(t) for t in sap_map.values())} test lab(s)",
                             size=13,
-                            color="darkorange",
+                            color=self._color('warning', '#f57c00'),
                             weight=ft.FontWeight.W_500,
                         ),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_FOREVER,
-                            icon_color="#ef6c00",
+                            icon_color=self._color('error', '#c62828'),
                             tooltip=f"Remove comparison group {group_id}",
                             on_click=lambda e, gid=group_id: self._handle_remove_comparison_group(gid),
                         ),
@@ -444,11 +697,11 @@ class GenerateTab(BaseTab):
                             ft.Text(
                                 f"• {sap_code}: {len(test_labs)} test(s)",
                                 size=12,
-                                color="darkorange",
+                                color=self._color('warning', '#f57c00'),
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.DELETE,
-                                icon_color="#fb8c00",
+                                icon_color=self._color('warning', '#fb8c00'),
                                 tooltip=f"Remove {sap_code} from {group_id}",
                                 on_click=lambda e, gid=group_id, sap=sap_code: self._handle_remove_comparison_group_sap(gid, sap),
                             ),
@@ -473,11 +726,11 @@ class GenerateTab(BaseTab):
                                     ft.Text(
                                         f"   └ Test {lab}: {voltage_display} | {notes_display}",
                                         size=11,
-                                        color="darkorange",
+                                        color=self._color('on_surface', '#1f2933'),
                                     ),
                                     ft.IconButton(
                                         icon=ft.Icons.CANCEL,
-                                        icon_color="#ffa726",
+                                        icon_color=self._color('error', '#e65100'),
                                         tooltip=f"Remove test {lab} from {group_id}",
                                         on_click=lambda e, gid=group_id, sap=sap_code, lab=lab: self._handle_remove_comparison_group_test(gid, sap, lab),
                                     ),
@@ -492,7 +745,7 @@ class GenerateTab(BaseTab):
                     ft.Container(
                         content=ft.Column(controls=[group_header, *sap_entries], spacing=4),
                         padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                        bgcolor="#fff3e0",
+                        bgcolor=self._color('warning_container', '#fff3e0'),
                         border_radius=6,
                     )
                 )
@@ -506,12 +759,12 @@ class GenerateTab(BaseTab):
                         ft.Text(
                             f"{sap_code}: {len(selected_test_labs) if selected_test_labs else 'All'} test(s)",
                             size=13,
-                            color="darkorange",
+                            color=self._color('warning', '#f57c00'),
                             weight=ft.FontWeight.W_500,
                         ),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_FOREVER,
-                            icon_color="#ef6c00",
+                            icon_color=self._color('error', '#c62828'),
                             tooltip=f"Remove SAP {sap_code} from comparison",
                             on_click=lambda e, sap=sap_code: self._handle_remove_comparison_sap(sap),
                         ),
@@ -523,10 +776,15 @@ class GenerateTab(BaseTab):
                     test_rows = [
                         ft.Row(
                             controls=[
-                                ft.Text(f"• Test {lab}", size=12, color="darkorange"),
+                                ft.Text(
+                                    f"• Test {lab}",
+                                    size=12,
+                                    color=self._color('warning', '#f57c00')
+                                ),
+                                
                                 ft.IconButton(
                                     icon=ft.Icons.CANCEL,
-                                    icon_color="#ffa726",
+                                    icon_color=self._color('error', '#e65100'),
                                     tooltip=f"Remove test {lab} from comparison",
                                     on_click=lambda e, sap=sap_code, lab=lab: self._handle_remove_comparison_test(sap, lab),
                                 ),
@@ -536,39 +794,68 @@ class GenerateTab(BaseTab):
                         for lab in selected_test_labs
                     ]
                 else:
-                    test_rows = [ft.Text("• All selected tests included", size=12, color="darkorange")]
+                    test_rows = [
+                        ft.Text(
+                            "• All selected tests included",
+                            size=12,
+                            color=self._color('warning', '#f57c00')
+                        )
+                    ]
 
                 legacy_controls.append(
                     ft.Container(
                         content=ft.Column(controls=[sap_header, *test_rows], spacing=3),
                         padding=ft.padding.symmetric(horizontal=10, vertical=6),
-                        bgcolor="#fff8e1",
+                        bgcolor=self._color('warning_container', '#fff8e1'),
                         border_radius=6,
                     )
                 )
 
         summary_controls: List[ft.Control] = []
         if group_controls:
-            summary_controls.append(ft.Text("✅ Comparison groups configured", size=14, color="darkorange"))
+            summary_controls.append(
+                ft.Text(
+                    "✅ Comparison groups configured",
+                    size=14,
+                    color=self._color('warning', '#f57c00')
+                )
+            )
             summary_controls.extend(group_controls)
         if legacy_controls:
-            summary_controls.append(ft.Text("✅ Legacy comparison selection active", size=14, color="darkorange"))
+            summary_controls.append(
+                ft.Text(
+                    "✅ Legacy comparison selection active",
+                    size=14,
+                    color=self._color('warning', '#f57c00')
+                )
+            )
             summary_controls.extend(legacy_controls)
         if not summary_controls:
-            summary_controls.append(ft.Text("❌ No comparison configurations selected", size=14, color="grey"))
+            summary_controls.append(
+                ft.Text(
+                    "❌ No comparison configurations selected",
+                    size=14,
+                    color=self._color('text_muted', '#5f6b7a')
+                )
+            )
 
         return ft.Container(
             content=ft.Column(
                 controls=[
-                    ft.Text("📈 COMPARISON SHEET", size=18, color="orange", weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        "📈 COMPARISON SHEET",
+                        size=18,
+                        color=self._color('warning', '#fb8c00'),
+                        weight=ft.FontWeight.BOLD
+                    ),
                     *summary_controls,
                 ],
                 spacing=6,
             ),
             padding=ft.padding.all(10),
-            bgcolor="#fff3e0",
+            bgcolor=self._color('warning_container', '#fff3e0'),
             border_radius=8,
-            border=ft.border.all(1, "#ffe0b2"),
+            border=ft.border.all(1, self._color('outline', '#ffe0b2')),
         )
 
     def _build_data_flow_section(self, state) -> ft.Control:
@@ -576,16 +863,19 @@ class GenerateTab(BaseTab):
         has_comparison_groups = bool(state.comparison_groups)
         has_traditional_comparison = state.include_comparison and bool(state.selected_comparison_saps)
 
+        accent_color = self._color('secondary', '#6a1b9a')
+        muted_color = self._color('text_muted', '#5f6b7a')
+
         summary_lines = [
             ft.Text(
                 f"Step 1: Selected {len(selected_tests)} test(s) → Performance Sheet (all tests)",
                 size=12,
-                color="purple",
+                color=accent_color,
             ),
             ft.Text(
                 f"Step 2: Selected {len(state.selected_noise_saps)} noise SAP(s) → Noise Analysis",
                 size=12,
-                color="purple",
+                color=accent_color,
             ),
         ]
 
@@ -594,7 +884,7 @@ class GenerateTab(BaseTab):
                 ft.Text(
                     f"Step 2: {len(state.comparison_groups)} comparison group(s) → Comparison Sheet",
                     size=12,
-                    color="purple",
+                    color=accent_color,
                 )
             )
         elif has_traditional_comparison:
@@ -602,7 +892,7 @@ class GenerateTab(BaseTab):
                 ft.Text(
                     f"Step 2: {len(state.selected_comparison_saps)} comparison SAP(s) → Comparison Sheet",
                     size=12,
-                    color="purple",
+                    color=accent_color,
                 )
             )
         else:
@@ -610,22 +900,27 @@ class GenerateTab(BaseTab):
                 ft.Text(
                     "Step 2: No comparison configured → No comparison sheet",
                     size=12,
-                    color="purple",
+                    color=muted_color,
                 )
             )
 
         return ft.Container(
             content=ft.Column(
                 controls=[
-                    ft.Text("📋 DATA FLOW SUMMARY", size=16, color="purple", weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        "📋 DATA FLOW SUMMARY",
+                        size=16,
+                        color=accent_color,
+                        weight=ft.FontWeight.BOLD,
+                    ),
                     *summary_lines,
                 ],
                 spacing=4,
             ),
             padding=ft.padding.all(10),
-            bgcolor="#f3e5f5",
+            bgcolor=self._color('secondary_container', '#f3e5f5'),
             border_radius=8,
-            border=ft.border.all(1, "#ce93d8"),
+            border=ft.border.all(1, self._color('outline_variant', '#ce93d8')),
         )
 
     def _handle_remove_performance_test(self, test_id: str):
@@ -719,16 +1014,25 @@ class GenerateTab(BaseTab):
             sap_text = ft.Text(
                 f"  • {sap_code}: {len(test_numbers)} test(s) ({', '.join(sorted(test_numbers))})",
                 size=12,
-                color="#333"
+                color=self._color('on_surface', '#1f2933'),
             )
             sap_summaries.append(sap_text)
         
         content_items = [
             ft.Row([
-                ft.Icon(ft.Icons.ASSESSMENT, color="#1976d2", size=16),
-                ft.Text("Performance Sheet", weight=ft.FontWeight.W_500, color="#1976d2", size=14)
+                ft.Icon(ft.Icons.ASSESSMENT, color=self._color('primary', '#1976d2'), size=16),
+                ft.Text(
+                    "Performance Sheet",
+                    weight=ft.FontWeight.W_500,
+                    color=self._color('primary', '#1976d2'),
+                    size=14,
+                ),
             ], spacing=5),
-            ft.Text(f"All {len(selected_tests)} selected tests will be included", size=12, color="#666"),
+            ft.Text(
+                f"All {len(selected_tests)} selected tests will be included",
+                size=12,
+                color=self._color('text_muted', '#5f6b7a'),
+            ),
         ]
         
         # Add SAP summaries
@@ -743,9 +1047,9 @@ class GenerateTab(BaseTab):
                 visible=True      # Explicitly visible
             ),
             padding=ft.padding.all(10),
-            bgcolor="#e3f2fd",
+            bgcolor=self._color('primary_container', '#e3f2fd'),
             border_radius=5,
-            border=ft.border.all(1, "#1976d2"),
+            border=ft.border.all(1, self._color('outline', '#90caf9')),
             expand=False,
             visible=True,         # Container explicitly visible
             height=None,          # Natural height
@@ -760,7 +1064,7 @@ class GenerateTab(BaseTab):
         # Get state to access noise test selections
         if not self.parent_gui or not hasattr(self.parent_gui, 'state_manager'):
             logger.warning("🔍 _build_noise_section: No state manager found")
-            return ft.Text("❌ No state manager found", color="red", size=14)
+            return ft.Text("❌ No state manager found", color=self._color('error', '#c62828'), size=14)
         
         state = self.parent_gui.state_manager.state
         
@@ -771,19 +1075,28 @@ class GenerateTab(BaseTab):
                 content=ft.Column(
                     controls=[
                         ft.Row([
-                            ft.Icon(ft.Icons.VOLUME_OFF, color="#9e9e9e", size=16),
-                            ft.Text("Noise Analysis", weight=ft.FontWeight.W_500, color="#9e9e9e", size=14)
+                            ft.Icon(ft.Icons.VOLUME_OFF, color=self._color('text_disabled', '#9e9e9e'), size=16),
+                            ft.Text(
+                                "Noise Analysis",
+                                weight=ft.FontWeight.W_500,
+                                color=self._color('text_disabled', '#9e9e9e'),
+                                size=14,
+                            )
                         ], spacing=5),
-                        ft.Text("Disabled - No SAP codes selected", size=12, color="#9e9e9e")
+                        ft.Text(
+                            "Disabled - No SAP codes selected",
+                            size=12,
+                            color=self._color('text_disabled', '#9e9e9e'),
+                        )
                     ],
                     spacing=3,
                     tight=True,
                     visible=True      # Explicitly visible
                 ),
                 padding=ft.padding.all(10),
-                bgcolor="#f5f5f5",
+                bgcolor=self._color('surface_container_low', '#f5f5f5'),
                 border_radius=5,
-                border=ft.border.all(1, "#9e9e9e"),
+                border=ft.border.all(1, self._color('outline_variant', '#cfcfcf')),
                 expand=False,
                 visible=True,         # Container explicitly visible
                 height=None,          # Natural height
@@ -802,16 +1115,25 @@ class GenerateTab(BaseTab):
             sap_text = ft.Text(
                 f"  • {sap_code}: {len(matching_tests)} test(s) ({', '.join(sorted(matching_tests)) if matching_tests else 'None selected'})",
                 size=12,
-                color="#333"
+                color=self._color('on_surface', '#1f2933'),
             )
             sap_summaries.append(sap_text)
         
         content_items = [
             ft.Row([
-                ft.Icon(ft.Icons.VOLUME_UP, color="#388e3c", size=16),
-                ft.Text("Noise Analysis", weight=ft.FontWeight.W_500, color="#388e3c", size=14)
+                ft.Icon(ft.Icons.VOLUME_UP, color=self._color('success', '#388e3c'), size=16),
+                ft.Text(
+                    "Noise Analysis",
+                    weight=ft.FontWeight.W_500,
+                    color=self._color('success', '#388e3c'),
+                    size=14,
+                )
             ], spacing=5),
-            ft.Text(f"Enabled for {len(selected_noise_saps)} SAP code(s)", size=12, color="#666"),
+            ft.Text(
+                f"Enabled for {len(selected_noise_saps)} SAP code(s)",
+                size=12,
+                color=self._color('text_muted', '#5f6b7a'),
+            ),
         ]
         content_items.extend(sap_summaries)
         
@@ -824,9 +1146,9 @@ class GenerateTab(BaseTab):
                 visible=True      # Explicitly visible
             ),
             padding=ft.padding.all(10),
-            bgcolor="#e8f5e8",
+            bgcolor=self._color('success_container', '#e8f5e8'),
             border_radius=5,
-            border=ft.border.all(1, "#388e3c"),
+            border=ft.border.all(1, self._color('outline', '#a5d6a7')),
             expand=False,
             visible=True,         # Container explicitly visible
             height=None,          # Natural height
@@ -841,19 +1163,28 @@ class GenerateTab(BaseTab):
                 content=ft.Column(
                     controls=[
                         ft.Row([
-                            ft.Icon(ft.Icons.COMPARE, color="#9e9e9e", size=16),
-                            ft.Text("Comparison Sheet", weight=ft.FontWeight.W_500, color="#9e9e9e", size=14)
+                            ft.Icon(ft.Icons.COMPARE, color=self._color('text_disabled', '#9e9e9e'), size=16),
+                            ft.Text(
+                                "Comparison Sheet",
+                                weight=ft.FontWeight.W_500,
+                                color=self._color('text_disabled', '#9e9e9e'),
+                                size=14,
+                            )
                         ], spacing=5),
-                        ft.Text("Disabled - No SAP codes selected", size=12, color="#9e9e9e")
+                        ft.Text(
+                            "Disabled - No SAP codes selected",
+                            size=12,
+                            color=self._color('text_disabled', '#9e9e9e'),
+                        )
                     ],
                     spacing=3,
                     tight=True,
                     visible=True      # Explicitly visible
                 ),
                 padding=ft.padding.all(10),
-                bgcolor="#f5f5f5",
+                bgcolor=self._color('surface_container_low', '#f5f5f5'),
                 border_radius=5,
-                border=ft.border.all(1, "#9e9e9e"),
+                border=ft.border.all(1, self._color('outline_variant', '#cfcfcf')),
                 expand=False,
                 visible=True,         # Container explicitly visible
                 height=None,          # Natural height
@@ -870,16 +1201,25 @@ class GenerateTab(BaseTab):
             sap_text = ft.Text(
                 f"  • {sap_code}: {len(matching_tests)} test(s) ({', '.join(sorted(matching_tests)) if matching_tests else 'None selected'})",
                 size=12,
-                color="#333"
+                color=self._color('on_surface', '#1f2933'),
             )
             sap_summaries.append(sap_text)
         
         content_items = [
             ft.Row([
-                ft.Icon(ft.Icons.COMPARE_ARROWS, color="#fbc02d", size=16),
-                ft.Text("Comparison Sheet", weight=ft.FontWeight.W_500, color="#fbc02d", size=14)
+                ft.Icon(ft.Icons.COMPARE_ARROWS, color=self._color('warning', '#fbc02d'), size=16),
+                ft.Text(
+                    "Comparison Sheet",
+                    weight=ft.FontWeight.W_500,
+                    color=self._color('warning', '#fbc02d'),
+                    size=14,
+                )
             ], spacing=5),
-            ft.Text(f"Enabled for {len(selected_comparison_saps)} SAP code(s)", size=12, color="#666"),
+            ft.Text(
+                f"Enabled for {len(selected_comparison_saps)} SAP code(s)",
+                size=12,
+                color=self._color('text_muted', '#5f6b7a'),
+            ),
         ]
         content_items.extend(sap_summaries)
         
@@ -892,9 +1232,9 @@ class GenerateTab(BaseTab):
                 visible=True      # Explicitly visible
             ),
             padding=ft.padding.all(10),
-            bgcolor="#fffde7",
+            bgcolor=self._color('warning_container', '#fffde7'),
             border_radius=5,
-            border=ft.border.all(1, "#fbc02d"),
+            border=ft.border.all(1, self._color('outline', '#ffe082')),
             expand=False,
             visible=True,         # Container explicitly visible
             height=None,          # Natural height

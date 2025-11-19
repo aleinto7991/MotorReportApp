@@ -26,7 +26,13 @@ from ..utils.common import open_file_externally, normalize_sap_code
 from ..data.parsers import InfParser, CsvParser
 from ..analysis.noise_handler import NoiseDataHandler
 from ..reports.excel_report import ExcelReport
-from ..config.directory_config import OUTPUT_DIR, LOGS_DIR, LOGO_PATH, invalidate_directory_cache
+from ..config.directory_config import (
+    OUTPUT_DIR,
+    LOGS_DIR,
+    LOGO_PATH,
+    ensure_directories_initialized,
+    invalidate_directory_cache,
+)
 from ..services.directory_locator import DirectoryLocator
 from ..services.registry_service import RegistryService
 from ..services.test_lab_summary_loader import TestLabSummaryLoader
@@ -209,12 +215,16 @@ class MotorReportApp:
 
         test_lab_summary = None
         if self.test_lab_loader and self.test_lab_loader.available:
+            # Check for override in config
+            override_path = self.config.selected_carichi_map.get(test_number)
+            
             self.logger.debug(
-                "Fetching test-lab summary for %s using base %s",
+                "Fetching test-lab summary for %s using base %s (override: %s)",
                 test_number,
                 getattr(self.test_lab_loader, "base_path", None),
+                override_path
             )
-            test_lab_summary = self.test_lab_loader.load_summary(test_number)
+            test_lab_summary = self.test_lab_loader.load_summary(test_number, override_path=override_path)
             if test_lab_summary:
                 self.logger.info(
                     "Test %s linked to workbook %s (scheda=%s, collaudo=%s)",
@@ -508,16 +518,18 @@ class MotorReportApp:
                 lf_tests_by_sap=lf_tests_by_sap
             )
 
+        final_output_path = self.config.output_path or output_path
+
         if generation_success:
-            self.logger.info(f"Excel report generated: {output_path}")
+            self.logger.info(f"Excel report generated: {final_output_path}")
             if status_callback: 
-                status_callback(f"Report successfully generated at: {output_path}", color='green')
+                status_callback(f"Report successfully generated at: {final_output_path}", color='green')
             else: 
-                self.logger.info(f"[SUCCESS] Report generated: {output_path}")
+                self.logger.info(f"[SUCCESS] Report generated: {final_output_path}")
             
             # Only open file automatically in CLI mode, not in GUI mode
             if self.config.open_after_creation and not status_callback:
-                open_file_externally(output_path)
+                open_file_externally(final_output_path)
         else:
             msg = "Report generation failed. Check log for details."
             self.logger.error("Report generation failed - invalidating directory cache for next startup")
@@ -792,7 +804,7 @@ class MotorReportApp:
 
         self._generate_report(status_callback=status_callback)
 
-    def generate_report(self, selected_tests: List[Test], performance_saps=None, noise_saps=None, comparison_saps=None, comparison_test_labs=None, selected_noise_tests=None, multiple_comparisons=None, include_noise_data=True, registry_sheet_name=None, noise_registry_sheet_name=None):
+    def generate_report(self, selected_tests: List[Test], performance_saps=None, noise_saps=None, comparison_saps=None, comparison_test_labs=None, selected_noise_tests=None, multiple_comparisons=None, include_noise_data=True, registry_sheet_name=None, noise_registry_sheet_name=None, carichi_matches=None):
         """
         Public method to generate a report with selected SAP codes for each feature.
         
@@ -807,12 +819,20 @@ class MotorReportApp:
             include_noise_data: Whether to include noise data
             registry_sheet_name: Name of the registry sheet
             noise_registry_sheet_name: Name of the noise registry sheet
+            carichi_matches: Dict[str, str] mapping test numbers to specific Carichi file paths
         """
         # Set config options
         self.config.include_noise = include_noise_data
         self.config.registry_sheet_name = registry_sheet_name or self.config.registry_sheet_name
         self.config.noise_registry_sheet_name = noise_registry_sheet_name or self.config.noise_registry_sheet_name
         self.config.compare_saps = comparison_saps or []
+        
+        # Store carichi matches if provided
+        if carichi_matches:
+            self.config.selected_carichi_map = carichi_matches
+            logger.info(f"Using manual Carichi file selections for {len(carichi_matches)} tests")
+        else:
+            self.config.selected_carichi_map = {}
         
         # Store multiple comparisons if provided
         if multiple_comparisons:
@@ -905,10 +925,17 @@ def main():
 
     args = parser.parse_args()
 
+    # Ensure auto-discovered directories (performance, noise, CARICHI, etc.) are populated
+    try:
+        ensure_directories_initialized()
+    except Exception as exc:  # pragma: no cover - defensive guard for CLI mode
+        logger.warning("Directory auto-detection failed during CLI startup: %s", exc)
+
     locator = DirectoryLocator()
 
     default_tests_dir = locator.performance_dir
     default_registry_file = locator.lab_registry_file
+    default_test_lab_dir = locator.test_lab_dir
 
     default_output_dir = locator.output_dir
     if not default_output_dir and OUTPUT_DIR:
@@ -945,6 +972,7 @@ def main():
             if args.logo_path
             else (str(default_logo_path) if default_logo_path and default_logo_path.exists() else None)
         ),
+        test_lab_root=str(default_test_lab_dir) if default_test_lab_dir else None,
         sap_codes=args.sap or [],
         compare_saps=args.compare or [],
         include_noise=not args.no_noise,

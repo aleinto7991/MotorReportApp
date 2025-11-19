@@ -60,7 +60,8 @@ def test_load_summary_prefers_exact_match_when_available(tmp_path: Path) -> None
     assert alias_summary.match_strategy == "exact"
 
 
-def test_load_summary_records_fallback_when_alias_used(tmp_path: Path) -> None:
+def test_load_summary_strict_matching(tmp_path: Path) -> None:
+    """Verify that strict matching is enforced (no fallback to 'A' alias)."""
     base_dir = tmp_path / "CARICHI"
     year_dir = base_dir / "2024"
 
@@ -69,9 +70,12 @@ def test_load_summary_records_fallback_when_alias_used(tmp_path: Path) -> None:
 
     loader = TestLabSummaryLoader(str(base_dir))
 
+    # Should NOT match 67890A when 67890 is requested
     summary = loader.load_summary("67890")
-    assert summary is not None
-    assert summary.source_path is not None
-    assert Path(summary.source_path).name == "67890A.xlsx"
-    assert summary.match_strategy in {"fallback_exact", "fallback_prefix"}
-    assert summary.matched_test_number == "67890A"
+    assert summary is None
+
+    # Should match 67890A when 67890A is requested
+    alias_summary = loader.load_summary("67890A")
+    assert alias_summary is not None
+    assert alias_summary.source_path is not None
+    assert Path(alias_summary.source_path).name == "67890A.xlsx"

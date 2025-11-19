@@ -1,102 +1,82 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+import os
+import sys
+
+# --- Configuration ---
+PROJECT_ROOT = os.getcwd()
+SRC_DIR = os.path.join(PROJECT_ROOT, 'src')
+
+# Ensure we can import from src during build to check version
+sys.path.insert(0, PROJECT_ROOT)
+
 try:
     from src._version import VERSION
-except Exception:
-    VERSION = "3.1.0"
+except ImportError:
+    VERSION = "0.0.0"
 
+# --- Collection ---
 datas = []
 binaries = []
-hiddenimports = [
-    'src.config',
-    'src.core',
-    'src.data',
-    'src.reports',
-    'src.reports.builders',
-    'src.analysis',
-    'src.ui',
-    'src.ui.core',
-    'src.ui.core.event_handlers',
-    'src.ui.core.state_manager',
-    'src.ui.core.workflow_manager',
-    'src.ui.core.status_manager',
-    'src.ui.core.search_manager',
-    'src.ui.core.report_manager',
-    'src.ui.core.search_controller',
-    'src.ui.core.selection_controller',
-    'src.ui.core.report_generation_controller',
-    'src.ui.core.file_picker_controller',
-    'src.ui.core.configuration_controller',
-    'src.ui.tabs',
-    'src.ui.components',
-    'src.ui.dialogs',
-    'src.ui.utils',
-    'src.services',
-    'src.services.lf_registry_reader',
-    'src.services.directory_locator',
-    'src.services.noise_registry_reader',
-    'src.services.noise_registry_loader',
-    'src.services.noise_directory_cache',
-    'src.services.registry_service',
-    'src.services.test_lab_summary_loader',
-    'src.services.lf_indexer',
-    'src.utils',
-    'src.validators',
+hiddenimports = []
+
+# 1. Collect all submodules from 'src' automatically
+# This replaces the long manual list and ensures new files are always included.
+try:
+    hiddenimports += collect_submodules('src')
+except Exception as e:
+    print(f"WARNING: Failed to collect src submodules: {e}")
+
+# FORCE INCLUDE CRITICAL EXCEL LIBRARIES
+# PyInstaller misses these because they are often loaded dynamically by pandas (engine='xlrd')
+hiddenimports += [
+    'xlrd', 
+    'openpyxl', 
+    'openpyxl.cell._writer',
+    'pandas',
+    'numpy'
 ]
 
-# Collect all Flet and Flet web packages
-tmp_ret = collect_all('flet')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('flet_web')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# 2. Collect Flet and Web dependencies (Crucial for UI)
+# collect_all returns (datas, binaries, hiddenimports)
+for package in ['flet', 'flet_web', 'flet_core', 'flet_runtime']:
+    try:
+        tmp_ret = collect_all(package)
+        datas += tmp_ret[0]
+        binaries += tmp_ret[1]
+        hiddenimports += tmp_ret[2]
+    except Exception:
+        pass
 
-# Collect additional Flet-related packages
-tmp_ret = collect_all('flet_core')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('flet_runtime')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# 3. Collect Data Processing Libraries
+# These often have hidden C-extensions or lazy imports
+for package in ['pandas', 'numpy', 'openpyxl', 'xlsxwriter', 'PIL', 'xlrd', 'uvicorn', 'fastapi', 'starlette', 'websockets']:
+    try:
+        hiddenimports += collect_submodules(package)
+    except Exception:
+        pass
 
-# Collect web server dependencies
-hiddenimports += collect_submodules('uvicorn')
-hiddenimports += collect_submodules('starlette')
-hiddenimports += collect_submodules('fastapi')
-hiddenimports += collect_submodules('websockets')
+# 4. Collect Assets
+# We copy the whole assets folder to the root of the bundle
+assets_path = os.path.join(PROJECT_ROOT, 'assets')
+if os.path.exists(assets_path):
+    datas.append((assets_path, 'assets'))
 
-# Add assets
-datas += [('assets\\logo.png', 'assets')]
-datas += [('assets\\logo.ico', 'assets')]
-
-
+# --- Build Analysis ---
 a = Analysis(
     ['src\\main.py'],
-    pathex=[
-        'src',
-        'src\\config',
-        'src\\core',
-        'src\\data',
-        'src\\reports',
-        'src\\reports\\builders',
-        'src\\analysis',
-        'src\\ui',
-        'src\\ui\\core',
-        'src\\ui\\tabs',
-        'src\\ui\\components',
-        'src\\ui\\dialogs',
-        'src\\ui\\utils',
-        'src\\services',
-        'src\\utils',
-        'src\\validators',
-    ],
+    pathex=[PROJECT_ROOT],  # ONLY Project Root to avoid import confusion
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['src/hooks/runtime_hook.py'],
     excludes=[],
     noarchive=False,
     optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -120,3 +100,5 @@ exe = EXE(
     entitlements_file=None,
     icon=['assets\\logo.ico'],
 )
+# Single-file build does not use COLLECT
+# coll = COLLECT(...)

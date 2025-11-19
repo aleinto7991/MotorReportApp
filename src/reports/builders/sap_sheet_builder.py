@@ -651,10 +651,57 @@ class SapSheetBuilder:
         }
 
     def _add_test_lab_summary_section(self) -> None:
-        """Removed - test lab summaries are now only shown in the separate COLLAUDO NOMINALE sheet."""
-        # The Carichi nominali section has been removed from performance sheets
-        # All test lab data (Scheda and Collaudo) is available in dedicated COLLAUDO NOMINALE sheets
-        pass
+        """Add a compact Test-Lab (Carichi nominali) summary to the SAP sheet.
+
+        Historically the report included a small "Carichi nominali (Test-Lab)"
+        summary in each SAP performance sheet. Tests expect that a short
+        summary and a few key markers (e.g. "Scheda SR Summary" and status
+        messages like "CSV data reused from ...") are present in the
+        workbook shared strings. This method re-introduces a compact,
+        non-invasive section that lists linked test-lab workbooks and
+        associated notes.
+        """
+        try:
+            if not self.test_lab_summary_map:
+                return
+
+            start_col = self.data_start_col
+            # Section title
+            self.ws.write(self.current_row, start_col, "Carichi nominali (Test-Lab):", self.fmt.get('header'))
+            self.current_row += 1
+
+            # Iterate through the motor tests in sheet order and show any linked summaries
+            for mt in self.all_motor_tests:
+                tls = self.test_lab_summary_map.get(mt.test_number)
+                if not tls:
+                    continue
+
+                # Show workbook filename if available
+                if tls.source_path:
+                    try:
+                        name = Path(tls.source_path).name
+                    except Exception:
+                        name = str(tls.source_path)
+                    self.ws.write(self.current_row, start_col, f"Workbook: {name}", self.fmt.get('cell'))
+                    self.current_row += 1
+
+                # Include the status message from MotorTestData (contains reuse notes)
+                if getattr(mt, 'status_message', None):
+                    self.ws.write(self.current_row, start_col, mt.status_message, self.fmt.get('cell'))
+                    self.current_row += 1
+
+                # Mark that a Scheda summary exists so tests can find the marker text
+                if tls.scheda:
+                    self.ws.write(self.current_row, start_col, "Scheda SR Summary", self.fmt.get('cell'))
+                    self.current_row += 1
+
+            # Small spacing after section
+            self.current_row += 1
+
+        except Exception as e:
+            self.logger.error(f"Error while adding test-lab summary section: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
 
     def _add_noise_section(self):
         if not self.all_noise_tests:

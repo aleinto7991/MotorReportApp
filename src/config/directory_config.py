@@ -107,7 +107,7 @@ def find_project_root() -> Path | None:
         if not validated_parent:
             continue
             
-        if (validated_parent / 'src').is_dir() and (validated_parent / 'assets').is_dir():
+        if (validated_parent / 'src').is_dir():
             logger.info(f"Project root found at: {validated_parent}")
             return validated_parent
             

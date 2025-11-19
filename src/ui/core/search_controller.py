@@ -114,8 +114,9 @@ class SearchController:
         
         # Use enhanced loading state with skeleton
         self.gui.results_area.controls.clear()
+        color_resolver = getattr(self.gui, "_themed_color", None)
         self.gui.results_area.controls.append(
-            LoadingState.create_search_loading(query=query)
+            LoadingState.create_search_loading(query=query, color_resolver=color_resolver)
         )
 
     def _ensure_backend_ready(self) -> bool:

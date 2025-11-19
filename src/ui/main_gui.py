@@ -49,10 +49,11 @@ from .tabs.generate_tab import GenerateTab
 from .core.status_manager import StatusManager
 from .components.base import ProgressIndicators
 from .utils.thread_pool import run_in_background, shutdown_thread_pool
-from .theme import set_user_theme
+from .theme import resolve_token, set_user_theme
 
 # Project specific imports
 from ..config.directory_config import PROJECT_ROOT
+from ..config.directory_config import ensure_directories_initialized
 from ..core.motor_report_engine import MotorReportApp
 from ..config.app_config import AppConfig
 from ..core.telemetry import log_duration
@@ -69,6 +70,7 @@ class MotorReportAppGUI:
     """
     def __init__(self, page: ft.Page):
         self.page = page
+        self._current_theme_mode: str = "system"
         self.app: Optional[MotorReportApp] = None
 
         # Initialize core managers first with profiling
@@ -144,21 +146,13 @@ class MotorReportAppGUI:
         self.page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
         self.page.padding = ft.padding.all(20)
         self.page.on_disconnect = self._handle_disconnect
+        self.page.on_platform_brightness_change = self._handle_platform_brightness_change
 
     def _initialize_ui_components(self):
         """Initializes all UI components and controls."""
         # Helper to resolve themed colors (falls back to plain strings)
         def themed_color(token: str, fallback: str):
-            try:
-                if hasattr(self.page, 'theme') and getattr(self.page, 'theme', None) is not None:
-                    cs = getattr(self.page.theme, 'color_scheme', None)
-                    if cs and hasattr(cs, token):
-                        val = getattr(cs, token)
-                        if val:
-                            return val
-            except Exception:
-                pass
-            return fallback
+            return resolve_token(self.page, token, fallback) or fallback
 
         self._themed_color = themed_color
         # Setup Tab Components
@@ -222,14 +216,19 @@ class MotorReportAppGUI:
                 on_change=self.search_manager.generate_filter_handler("notes")
             )
         }
+        self._style_primary_text_inputs()
         self.clear_filters_button = ft.TextButton(
             "Clear Filters",
             icon=ft.Icons.CLEAR_ALL,
             on_click=self.search_manager.clear_filters
         )
+        self.results_filter_icon = ft.Icon(
+            ft.Icons.FILTER_ALT,
+            color=self._themed_color('primary', 'blue')
+        )
         self.results_filters_row = ft.Container(
             content=ft.Row([
-                ft.Icon(ft.Icons.FILTER_ALT, color="blue"),
+                self.results_filter_icon,
                 self.results_filter_inputs["test_lab"],
                 self.results_filter_inputs["date"],
                 self.results_filter_inputs["voltage"],
@@ -279,21 +278,22 @@ class MotorReportAppGUI:
         self.config_apply_button = ft.ElevatedButton(
             "Apply Selection",
             icon=ft.Icons.CHECK_CIRCLE,
-            bgcolor="green",
-            color="white",
+            bgcolor=self._themed_color('success', 'green'),
+            color=self._themed_color('on_success', 'white'),
             on_click=self.event_handlers.on_apply_config_selection if self._has_event_handlers() else None
+        )
+        self.config_clear_button = ft.ElevatedButton(
+            "Clear Selection",
+            icon=ft.Icons.CLEAR_ALL,
+            bgcolor=self._themed_color('surface_variant', 'grey'),
+            color=self._themed_color('on_surface', 'white'),
+            on_click=self.event_handlers.on_clear_config_selection if self._has_event_handlers() else None
         )
         
         self.config_navigation_container = ft.Container(
             content=ft.Row([
                 self.config_apply_button,
-                ft.ElevatedButton(
-                    "Clear Selection",
-                    icon=ft.Icons.CLEAR_ALL,
-                    bgcolor="grey",
-                    color="white",
-                    on_click=self.event_handlers.on_clear_config_selection if self._has_event_handlers() else None
-                )
+                self.config_clear_button,
             ], alignment=ft.MainAxisAlignment.END, spacing=10),
             visible=True
         )
@@ -309,7 +309,8 @@ class MotorReportAppGUI:
         self.generation_summary = ft.Markdown("Report is not yet configured.")
         self.generate_button = ft.ElevatedButton(
             "Generate Report", icon=ft.Icons.CREATE, on_click=self.event_handlers.on_generate_report_clicked,
-            bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE,
+            bgcolor=self._themed_color('primary', ft.Colors.BLUE_700),
+            color=self._themed_color('on_primary', ft.Colors.WHITE),
         )
 
         # Global components
@@ -317,7 +318,12 @@ class MotorReportAppGUI:
         self.progress_bar = ft.ProgressBar(width=200, visible=False)
         self.status_bar = ft.Row([self.status_text, self.progress_bar], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         
-        self.status_manager = StatusManager(self.status_text, self.progress_bar, self._safe_page_update)
+        self.status_manager = StatusManager(
+            self.status_text,
+            self.progress_bar,
+            self._safe_page_update,
+            color_resolver=self._resolve_status_color,
+        )
         self.progress_indicators = ProgressIndicators()
         self.progress_indicators.create_indicators(4)
         
@@ -335,6 +341,7 @@ class MotorReportAppGUI:
                     stored_theme = None
 
             theme_value = stored_theme or 'system'
+            self._current_theme_mode = theme_value
             self.theme_dropdown = ft.Dropdown(
                 label='Theme',
                 value=theme_value,
@@ -342,8 +349,12 @@ class MotorReportAppGUI:
                 on_change=lambda e: self._on_theme_changed(e.control.value),
                 width=160,
             )
+            self._style_theme_dropdown()
         except Exception:
             self.theme_dropdown = ft.Container()
+
+        # Ensure global controls pick up the active palette immediately
+        self._apply_theme_colors_to_global_controls()
 
     def _setup_file_pickers(self):
         """Sets up the file and folder pickers."""
@@ -369,17 +380,26 @@ class MotorReportAppGUI:
         with log_duration(logger, "GenerateTab creation", level=logging.DEBUG):
             self.generate_tab = GenerateTab(self)
         
+        self._tab_icon_defs = [
+            ft.Icons.SETTINGS,
+            ft.Icons.SEARCH,
+            ft.Icons.TUNE,
+            ft.Icons.CREATE,
+        ]
+
         self.tabs = ft.Tabs(
             selected_index=0,
             on_change=self.event_handlers.on_tab_change,
             tabs=[
-                ft.Tab(text="1. Setup", icon=ft.Icons.SETTINGS, content=self.setup_tab.get_tab_content()),
-                ft.Tab(text="2. Search & Select", icon=ft.Icons.SEARCH, content=self.search_select_tab.get_tab_content()),
-                ft.Tab(text="3. Configure", icon=ft.Icons.TUNE, content=self.config_tab.get_tab_content()),
-                ft.Tab(text="4. Generate", icon=ft.Icons.CREATE, content=self.generate_tab.get_tab_content()),
+                ft.Tab(text="1. Setup", icon=self._tab_icon(self._tab_icon_defs[0]), content=self.setup_tab.get_tab_content()),
+                ft.Tab(text="2. Search & Select", icon=self._tab_icon(self._tab_icon_defs[1]), content=self.search_select_tab.get_tab_content()),
+                ft.Tab(text="3. Configure", icon=self._tab_icon(self._tab_icon_defs[2]), content=self.config_tab.get_tab_content()),
+                ft.Tab(text="4. Generate", icon=self._tab_icon(self._tab_icon_defs[3]), content=self.generate_tab.get_tab_content()),
             ],
             expand=True,
         )
+
+        self._refresh_tab_icons()
 
         # Header row with app title and theme toggle
         # Wrap theme control in a small padded container so its popup isn't clipped
@@ -485,6 +505,218 @@ class MotorReportAppGUI:
                 logger.debug(f"Page update error: {e}")
         return False
 
+    def _resolve_status_color(self, color: Optional[str]) -> Optional[str]:
+        """Map legacy color keywords to themed tokens for better contrast."""
+        if not hasattr(self, '_themed_color'):
+            return color
+
+        if not color:
+            return self._themed_color('on_surface', '#1f2933')
+
+        normalized = str(color).lower()
+        if normalized.startswith('#'):
+            return color
+
+        token_map = {
+            'green': ('success', '#2e7d32'),
+            'red': ('error', '#c62828'),
+            'blue': ('info', '#0288d1'),
+            'orange': ('warning', '#f57c00'),
+            'black': ('on_surface', '#1f2933'),
+            'white': ('on_surface', '#f1f5f9'),
+        }
+
+        token, fallback = token_map.get(normalized, ('on_surface', color))
+        return self._themed_color(token, fallback if isinstance(fallback, str) else color)
+
+    def _apply_theme_mode(self, mode: str, *, reason: str = "user"):
+        """Central handler for applying a requested theme mode."""
+        if mode not in ("light", "dark", "system"):
+            return
+
+        self._current_theme_mode = mode
+
+        if reason != "platform":
+            self._persist_theme_preference(mode)
+
+        try:
+            set_user_theme(self.page, mode)
+        except Exception as exc:
+            logger.debug(f"set_user_theme failed: {exc}")
+
+        self._sync_theme_dropdown_value(mode)
+        self._refresh_theme_after_change(reason)
+
+    def _persist_theme_preference(self, mode: str):
+        """Persist the chosen theme mode to client storage for future sessions."""
+        storage = getattr(self.page, 'client_storage', None)
+        if not storage:
+            return
+        try:
+            storage.set('theme', mode)
+        except Exception as exc:
+            logger.debug(f"Could not persist theme preference: {exc}")
+
+    def _sync_theme_dropdown_value(self, mode: str):
+        """Keep the theme dropdown selection aligned with the applied mode."""
+        dropdown = getattr(self, 'theme_dropdown', None)
+        if not dropdown or not hasattr(dropdown, 'value'):
+            return
+        if dropdown.value == mode:
+            return
+        try:
+            dropdown.value = mode
+            dropdown.update()
+        except Exception:
+            pass
+
+    def _refresh_theme_after_change(self, reason: str):
+        """Refresh UI controls after a theme change to pick up new tokens."""
+        self._apply_theme_colors_to_global_controls()
+        self._rebuild_tabs_for_theme()
+
+        if hasattr(self, 'search_manager') and self._search_manager:
+            try:
+                self.search_manager.display_search_results()
+            except Exception as exc:
+                logger.debug(f"Search results refresh failed after theme change: {exc}")
+
+        try:
+            if hasattr(self, 'status_manager') and self.status_manager:
+                source = "system" if reason == "platform" else reason
+                self.status_manager.update_status(
+                    f"Theme set to {self._current_theme_mode} ({source})",
+                    "blue"
+                )
+        except Exception as exc:
+            logger.debug(f"Status update failed after theme change: {exc}")
+
+        self._safe_page_update()
+
+    def _apply_theme_colors_to_global_controls(self):
+        """Reapply semantic colors to shared controls that are not rebuilt automatically."""
+        if not hasattr(self, '_themed_color'):
+            return
+        try:
+            if hasattr(self, 'config_apply_button') and self.config_apply_button:
+                self.config_apply_button.bgcolor = self._themed_color('success', 'green')
+                self.config_apply_button.color = self._themed_color('on_success', 'white')
+            if hasattr(self, 'config_clear_button') and self.config_clear_button:
+                self.config_clear_button.bgcolor = self._themed_color('surface_variant', 'grey')
+                self.config_clear_button.color = self._themed_color('on_surface', 'white')
+            if hasattr(self, 'generate_button') and self.generate_button:
+                self.generate_button.bgcolor = self._themed_color('primary', ft.Colors.BLUE_700)
+                self.generate_button.color = self._themed_color('on_primary', ft.Colors.WHITE)
+            if hasattr(self, 'results_filter_icon') and self.results_filter_icon:
+                self.results_filter_icon.color = self._themed_color('primary', 'blue')
+            self._style_primary_text_inputs()
+            self._style_theme_dropdown()
+            if hasattr(self, 'setup_tab') and hasattr(self.setup_tab, 'apply_textfield_theme'):
+                self.setup_tab.apply_textfield_theme()
+            self._refresh_tab_icons()
+        except Exception as exc:
+            logger.debug(f"Global control theming failed: {exc}")
+
+    def _style_theme_dropdown(self):
+        dropdown = getattr(self, 'theme_dropdown', None)
+        if not dropdown or not hasattr(self, '_themed_color'):
+            return
+        try:
+            dropdown.color = self._themed_color('on_surface', '#1f2933')
+            dropdown.bgcolor = self._themed_color('surface', '#f7f9fc')
+            dropdown.fill_color = self._themed_color('surface_variant', '#e0e7ef')
+            dropdown.border_color = self._themed_color('outline', '#c5cbd3')
+            dropdown.focused_border_color = self._themed_color('primary', '#1565c0')
+            dropdown.icon_color = self._themed_color('on_surface', '#ffffff')
+            dropdown.label_style = ft.TextStyle(color=self._themed_color('on_surface', '#ffffff'))
+            dropdown.hint_style = ft.TextStyle(color=self._themed_color('on_surface', '#ffffff'))
+            dropdown.text_style = ft.TextStyle(color=self._themed_color('on_surface', '#ffffff'))
+        except Exception as exc:
+            logger.debug(f"Theme dropdown styling failed: {exc}")
+
+    def _style_primary_text_inputs(self):
+        if not hasattr(self, '_themed_color'):
+            return
+        inputs = []
+        if hasattr(self, 'search_input_field') and self.search_input_field:
+            inputs.append(self.search_input_field)
+        if hasattr(self, 'results_filter_inputs'):
+            inputs.extend(self.results_filter_inputs.values())
+        for text_field in inputs:
+            self._style_text_field(text_field)
+
+    def _style_text_field(self, control: Optional[ft.TextField]):
+        if not control or not hasattr(self, '_themed_color'):
+            return
+        try:
+            readable = self._themed_color('on_surface', '#ffffff')
+            muted = self._themed_color('text_muted', '#d1d9e6')
+            field_bg = self._themed_color('surface_variant', '#2a3340')
+            outline = self._themed_color('outline', '#8895a8')
+            control.color = readable
+            control.bgcolor = field_bg
+            control.fill_color = field_bg
+            control.border_color = outline
+            control.focused_border_color = self._themed_color('primary', '#90caf9')
+            control.text_style = ft.TextStyle(color=readable)
+            control.label_style = ft.TextStyle(color=readable)
+            control.hint_style = ft.TextStyle(color=muted)
+        except Exception as exc:
+            logger.debug(f"Text field styling failed: {exc}")
+
+    def _tab_icon(self, icon_value):
+        color = self._themed_color('on_surface', '#fefefe') if hasattr(self, '_themed_color') else '#ffffff'
+        if isinstance(icon_value, ft.Icon):
+            icon_value.color = color
+            return icon_value
+        return ft.Icon(icon_value, color=color)
+
+    def _refresh_tab_icons(self):
+        if not hasattr(self, 'tabs') or not getattr(self.tabs, 'tabs', None):
+            return
+        icon_defs = getattr(self, '_tab_icon_defs', None)
+        if not icon_defs:
+            return
+        for idx, icon_value in enumerate(icon_defs):
+            if idx >= len(self.tabs.tabs):
+                continue
+            try:
+                self.tabs.tabs[idx].icon = self._tab_icon(icon_value)
+            except Exception:
+                continue
+        try:
+            self.tabs.update()
+        except Exception:
+            pass
+
+    def _rebuild_tabs_for_theme(self):
+        """Rebuild tab contents so that all themed controls re-evaluate their tokens."""
+        if not hasattr(self, 'tabs') or not getattr(self.tabs, 'tabs', None):
+            return
+
+        tab_map = [
+            (0, 'setup_tab'),
+            (1, 'search_select_tab'),
+            (2, 'config_tab'),
+            (3, 'generate_tab'),
+        ]
+
+        for index, attr in tab_map:
+            if index >= len(self.tabs.tabs):
+                continue
+            tab_instance = getattr(self, attr, None)
+            if not tab_instance:
+                continue
+            try:
+                self.tabs.tabs[index].content = tab_instance.get_tab_content()
+            except Exception as exc:
+                logger.debug(f"Unable to rebuild tab {attr}: {exc}")
+
+    def _handle_platform_brightness_change(self, e):
+        """Auto-apply theme changes when running in system mode and the OS updates its theme."""
+        if self._current_theme_mode == "system":
+            self._apply_theme_mode("system", reason="platform")
+
     def _refresh_all_path_displays(self):
         """Force refresh all path display components."""
         self._safe_component_update(self.tests_folder_path_text)
@@ -495,55 +727,68 @@ class MotorReportAppGUI:
     def _update_path_displays_with_auto_detected_values(self):
         """Update path displays with auto-detected values from directory configuration."""
         try:
-            from ..config.directory_config import PERFORMANCE_TEST_DIR, LAB_REGISTRY_FILE, NOISE_TEST_DIR, NOISE_REGISTRY_FILE
+            from ..config.directory_config import (
+                PERFORMANCE_TEST_DIR,
+                LAB_REGISTRY_FILE,
+                NOISE_TEST_DIR,
+                NOISE_REGISTRY_FILE,
+                TEST_LAB_CARICHI_DIR,
+            )
             
             # Performance test folder
+            success_color = self._themed_color('success', '#2e7d32')
+            warning_color = self._themed_color('warning', '#f57c00')
+
             if PERFORMANCE_TEST_DIR and PERFORMANCE_TEST_DIR.exists():
                 self.tests_folder_path_text.value = f"🎯 Auto-detected: {PERFORMANCE_TEST_DIR}"
-                self.tests_folder_path_text.color = "green"
+                self.tests_folder_path_text.color = success_color
                 self.tests_folder_path_text.italic = False
                 # Update state manager with auto-detected path
                 if self.state_manager:
                     self.state_manager.update_paths(tests_folder=str(PERFORMANCE_TEST_DIR))
             else:
                 self.tests_folder_path_text.value = "⚠️ No test folder auto-detected. Please select manually."
-                self.tests_folder_path_text.color = "orange"
+                self.tests_folder_path_text.color = warning_color
             
             # Performance registry file
             if LAB_REGISTRY_FILE and LAB_REGISTRY_FILE.exists():
                 self.registry_file_path_text.value = f"🎯 Auto-detected: {LAB_REGISTRY_FILE}"
-                self.registry_file_path_text.color = "green"
+                self.registry_file_path_text.color = success_color
                 self.registry_file_path_text.italic = False
                 # Update state manager with auto-detected path
                 if self.state_manager:
                     self.state_manager.update_paths(registry_file=str(LAB_REGISTRY_FILE))
             else:
                 self.registry_file_path_text.value = "⚠️ No registry file auto-detected. Please select manually."
-                self.registry_file_path_text.color = "orange"
+                self.registry_file_path_text.color = warning_color
             
             # Noise test folder
             if NOISE_TEST_DIR and NOISE_TEST_DIR.exists():
                 self.noise_folder_path_text.value = f"🎯 Auto-detected: {NOISE_TEST_DIR}"
-                self.noise_folder_path_text.color = "green"
+                self.noise_folder_path_text.color = success_color
                 self.noise_folder_path_text.italic = False
                 # Update state manager with auto-detected path
                 if self.state_manager:
                     self.state_manager.update_paths(noise_folder=str(NOISE_TEST_DIR))
             else:
                 self.noise_folder_path_text.value = "⚠️ No noise folder auto-detected. Please select manually."
-                self.noise_folder_path_text.color = "orange"
+                self.noise_folder_path_text.color = warning_color
             
             # Noise registry file
             if NOISE_REGISTRY_FILE and NOISE_REGISTRY_FILE.exists():
                 self.noise_registry_path_text.value = f"🎯 Auto-detected: {NOISE_REGISTRY_FILE}"
-                self.noise_registry_path_text.color = "green"
+                self.noise_registry_path_text.color = success_color
                 self.noise_registry_path_text.italic = False
                 # Update state manager with auto-detected path
                 if self.state_manager:
                     self.state_manager.update_paths(noise_registry=str(NOISE_REGISTRY_FILE))
             else:
                 self.noise_registry_path_text.value = "⚠️ No noise registry auto-detected. Please select manually."
-                self.noise_registry_path_text.color = "orange"
+                self.noise_registry_path_text.color = warning_color
+
+            # Test Lab (Carichi Nominali) directory
+            if TEST_LAB_CARICHI_DIR and TEST_LAB_CARICHI_DIR.exists() and self.state_manager:
+                self.state_manager.update_paths(test_lab_dir=str(TEST_LAB_CARICHI_DIR))
             
             # Initialize backend with auto-detected paths
             if PERFORMANCE_TEST_DIR and LAB_REGISTRY_FILE:
@@ -579,24 +824,7 @@ class MotorReportAppGUI:
     def _on_theme_changed(self, mode: str):
         """Apply and persist the user theme selection."""
         try:
-            if mode not in ("light", "dark", "system"):
-                return
-            # Persist via client storage and apply via theme helper
-            if hasattr(self.page, 'client_storage') and self.page.client_storage is not None:
-                try:
-                    self.page.client_storage.set('theme', mode)
-                except Exception:
-                    pass
-            try:
-                set_user_theme(self.page, mode)
-            except Exception:
-                pass
-            # Provide immediate feedback
-            try:
-                self.status_manager.update_status(f"Theme set to {mode}", "blue")
-                self._safe_page_update()
-            except Exception:
-                pass
+            self._apply_theme_mode(mode, reason="user")
         except Exception as e:
             logger.debug(f"Error changing theme: {e}")
 
@@ -639,13 +867,25 @@ class MotorReportAppGUI:
                     test_data = self.app._process_single_test(test.test_lab_number)
                     if test_data:
                         details_content.controls.extend([
-                            ft.Text(f"✓ INF file: {'Found' if test_data.inf_data else 'Not found'}", color="green" if test_data.inf_data else "red"),
-                            ft.Text(f"✓ CSV file: {'Found' if test_data.csv_data is not None else 'Not found'}", color="green" if test_data.csv_data is not None else "red"),
-                            ft.Text(f"✓ Noise data: {'Found' if test_data.noise_info else 'Not found'}", color="green" if test_data.noise_info else "orange"),
+                            ft.Text(
+                                f"✓ INF file: {'Found' if test_data.inf_data else 'Not found'}",
+                                color=self._themed_color('success', 'green') if test_data.inf_data else self._themed_color('error', 'red')
+                            ),
+                            ft.Text(
+                                f"✓ CSV file: {'Found' if test_data.csv_data is not None else 'Not found'}",
+                                color=self._themed_color('success', 'green') if test_data.csv_data is not None else self._themed_color('error', 'red')
+                            ),
+                            ft.Text(
+                                f"✓ Noise data: {'Found' if test_data.noise_info else 'Not found'}",
+                                color=self._themed_color('success', 'green') if test_data.noise_info else self._themed_color('warning', 'orange')
+                            ),
                             ft.Text(f"Status: {test_data.status_message}")
                         ])
                 except Exception as e:
-                    details_content.controls.append(ft.Text(f"Error checking backend status: {str(e)}", color="red"))
+                    details_content.controls.append(ft.Text(
+                        f"Error checking backend status: {str(e)}",
+                        color=self._themed_color('error', 'red')
+                    ))
             
             dialog = ft.AlertDialog(
                 title=ft.Text("Test Information"),
@@ -664,7 +904,10 @@ class MotorReportAppGUI:
             
         except Exception as e:
             logger.error(f"Error showing test details: {e}")
-            self.status_manager.update_status(f"Error showing test details: {str(e)}", "red")
+            self.status_manager.update_status(
+                f"Error showing test details: {str(e)}",
+                self._themed_color('error', 'red')
+            )
 
     def _close_dialog(self):
         """Close the current dialog using Flet's page.close method."""
@@ -882,7 +1125,30 @@ def main(page: ft.Page):
     
     # Set project root for the application
     page.client_storage.set("project_root", str(PROJECT_ROOT))
-    
+    # Ensure data directories are initialized (per-user auto-discovery)
+    try:
+        ensure_directories_initialized()
+    except Exception:
+        logger.debug("ensure_directories_initialized() failed or deferred")
+
+    # Ensure per-user directory cache file exists (create empty cache on first startup)
+    try:
+        from ..config.directory_cache import get_directory_cache
+        cache = get_directory_cache()
+        # Log effective cache path for troubleshooting and visibility
+        try:
+            logger.info(f"Directory cache path: {cache.cache_file}")
+        except Exception:
+            logger.debug("Could not read cache.cache_file for logging")
+
+        # Ensure cache file exists on disk (uses atomic write)
+        try:
+            cache.ensure_exists()
+        except Exception:
+            logger.debug("Could not ensure per-user directory cache file exists")
+    except Exception:
+        logger.debug("Directory cache initialization skipped")
+
     gui = MotorReportAppGUI(page)
     page.update()
 
