@@ -882,7 +882,7 @@ class EventHandlers:
     def handle_post_build_setup(self):
         """Handle post-build setup tasks"""
         # Update initial paths from directory config
-        from ...config.directory_config import PERFORMANCE_TEST_DIR, LAB_REGISTRY_FILE
+        from ...config.directory_config import PERFORMANCE_TEST_DIR, LAB_REGISTRY_FILE, TEST_LAB_CARICHI_DIR
         
         if PERFORMANCE_TEST_DIR:
             self.state.update_paths(tests_folder=str(PERFORMANCE_TEST_DIR))
@@ -892,6 +892,9 @@ class EventHandlers:
             self.state.update_paths(registry_file=str(LAB_REGISTRY_FILE))
             self.gui.registry_file_path_text.value = f"Auto-detected: {LAB_REGISTRY_FILE}"
         
+        if TEST_LAB_CARICHI_DIR:
+            self.state.update_paths(test_lab_dir=str(TEST_LAB_CARICHI_DIR))
+
         # Initialize backend in background using thread pool
         run_in_background(self._initialize_backend)
         
@@ -915,6 +918,7 @@ class EventHandlers:
                 logo_path=str(LOGO_PATH) if LOGO_PATH else None,
                 noise_registry_path=str(NOISE_REGISTRY_FILE) if NOISE_REGISTRY_FILE else None,
                 noise_dir=str(NOISE_TEST_DIR) if NOISE_TEST_DIR else None,
+                test_lab_root=self.state.state.test_lab_directory or None,
                 pressure_unit=self.state.state.pressure_unit,
                 flow_unit=self.state.state.flow_unit,
                 speed_unit=self.state.state.speed_unit,

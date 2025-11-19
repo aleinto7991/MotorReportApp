@@ -37,6 +37,10 @@ class ConfigTab(BaseTab):
         
         # PERFORMANCE OPTIMIZATION: Start preloading noise cache immediately for better responsiveness
         self._preload_noise_registry_async()
+
+    def _color(self, token: str, fallback: str) -> str:
+        """Convenience wrapper around BaseComponent.theme_color."""
+        return self.theme_color(token, fallback)
     
     def _clear_noise_cache(self):
         """Clear noise data cache to force reload"""
@@ -71,6 +75,9 @@ class ConfigTab(BaseTab):
             else:
                 logger.debug("ConfigTab: No state manager or parent GUI found")
                 
+            # Local helper for semantic colors
+            color = self._color
+
             # Initialize sections (fast generation without heavy computation)
             noise_sap_sections = []
             lf_sap_sections = []
@@ -117,15 +124,15 @@ class ConfigTab(BaseTab):
             none_noise_btn = ft.ElevatedButton(
                 "None (Disable Noise)",
                 icon=ft.Icons.CLOSE,
-                bgcolor="#bdbdbd",
-                color="black",
+                bgcolor=color('surface_variant', '#bdbdbd'),
+                color=color('on_surface', 'black'),
                 on_click=lambda e: self._disable_noise_feature()
             )
             none_comparison_btn = ft.ElevatedButton(
                 "None (Disable Comparison)",
                 icon=ft.Icons.CLOSE,
-                bgcolor="#bdbdbd",
-                color="black",
+                bgcolor=color('surface_variant', '#bdbdbd'),
+                color=color('on_surface', 'black'),
                 on_click=lambda e: self._disable_comparison_feature()
             )
             
@@ -141,21 +148,37 @@ class ConfigTab(BaseTab):
                         step2_progress or ft.Container(),
                         step2_status or ft.Container(),
                     ], spacing=10),
-                    ft.Text("Select which SAP codes to use for each feature. Only SAP codes with test labs selected in the previous step are shown. Performance reports will include all selected SAP codes automatically.", color="grey", size=14),
+                    ft.Text(
+                        "Select which SAP codes to use for each feature. Only SAP codes with test labs selected in the previous step are shown. Performance reports will include all selected SAP codes automatically.",
+                        color=color('text_muted', 'white'),
+                        size=14
+                    ),
                     self._build_unit_selection_section(),
                     ft.Divider(),
-                    ft.Text("Noise SAP Codes:", color="#388e3c", size=16, weight=ft.FontWeight.W_500),
-                    ft.Text("Select SAP codes for noise tests. When checked, you can choose specific tests from the noise registry. Tests are unchecked by default.", color="grey", size=12),
+                    ft.Text("Noise SAP Codes:", color=color('success', '#388e3c'), size=16, weight=ft.FontWeight.W_500),
+                    ft.Text(
+                        "Select SAP codes for noise tests. When checked, you can choose specific tests from the noise registry. Tests are unchecked by default.",
+                        color=color('text_muted', 'grey'),
+                        size=12
+                    ),
                     ft.Column(noise_sap_sections, spacing=5),
                     *noise_info_msgs,
                     none_noise_btn,
                     ft.Divider(),
-                    ft.Text("🔬 Life Test (LF) SAP Codes:", color="#1976d2", size=16, weight=ft.FontWeight.W_500),
-                    ft.Text("Select SAP codes for Life Test data. When checked, you can choose specific LF tests from the registry. The report will include hyperlinks to the test files.", color="grey", size=12),
+                    ft.Text("🔬 Life Test (LF) SAP Codes:", color=color('primary', '#1976d2'), size=16, weight=ft.FontWeight.W_500),
+                    ft.Text(
+                        "Select SAP codes for Life Test data. When checked, you can choose specific LF tests from the registry. The report will include hyperlinks to the test files.",
+                        color=color('text_muted', 'grey'),
+                        size=12
+                    ),
                     ft.Column(lf_sap_sections, spacing=5),
                     ft.Divider(),
-                    ft.Text("Comparison SAP Codes:", color="#fbc02d", size=16, weight=ft.FontWeight.W_500),
-                    ft.Text("Create multiple comparison groups. Each group can include tests from any SAP codes. Test labs can be reused across different comparisons.", color="grey", size=12),
+                    ft.Text("Comparison SAP Codes:", color=color('warning', '#fbc02d'), size=16, weight=ft.FontWeight.W_500),
+                    ft.Text(
+                        "Create multiple comparison groups. Each group can include tests from any SAP codes. Test labs can be reused across different comparisons.",
+                        color=color('text_muted', 'grey'),
+                        size=12
+                    ),
                     
                     # Container for all comparison groups
                     ft.Container(
@@ -168,8 +191,8 @@ class ConfigTab(BaseTab):
                         content=ft.ElevatedButton(
                             "Add Comparison",
                             icon=ft.Icons.ADD,
-                            bgcolor="blue",
-                            color="white",
+                            bgcolor=color('primary', 'blue'),
+                            color=color('on_primary', 'white'),
                             on_click=self._add_new_comparison_group
                         ),
                         padding=ft.padding.symmetric(vertical=10)
@@ -197,9 +220,9 @@ class ConfigTab(BaseTab):
             # Return a simple error message container
             return ft.Container(
                 content=ft.Column([
-                    ft.Text("❌ Error loading configuration tab", size=20, color="red"),
-                    ft.Text(f"Error: {str(e)}", size=14, color="red"),
-                    ft.Text("Please check the console for details.", size=12, color="grey")
+                    ft.Text("❌ Error loading configuration tab", size=20, color=self.theme_color('error', 'red')),
+                    ft.Text(f"Error: {str(e)}", size=14, color=self.theme_color('error', 'red')),
+                    ft.Text("Please check the console for details.", size=12, color=self.theme_color('text_muted', 'grey'))
                 ], spacing=10),
                 padding=ft.padding.all(20),
                 expand=True
@@ -241,13 +264,18 @@ class ConfigTab(BaseTab):
 
         description = ft.Text(
             "Choose how measurements are displayed in charts and Excel exports. Changes apply immediately to new reports.",
-            color="grey",
+            color=self.theme_color('text_muted', 'grey'),
             size=12,
         )
 
         return ft.Container(
             content=ft.Column([
-                ft.Text("Measurement Units", color="#1976d2", size=16, weight=ft.FontWeight.W_500),
+                ft.Text(
+                    "Measurement Units",
+                    color=self.theme_color('primary', '#1976d2'),
+                    size=16,
+                    weight=ft.FontWeight.W_500
+                ),
                 description,
                 ft.ResponsiveRow([
                     ft.Container(content=pressure_dropdown, col={'xs': 12, 'md': 6, 'lg': 3}),
@@ -296,7 +324,12 @@ class ConfigTab(BaseTab):
         test_lab_checkboxes = []
         if selected_tests_from_step2:
             test_lab_checkboxes.append(
-                ft.Text(f"Select test lab numbers for {sap_code} (from your previous selection):", size=12, color="grey", weight=ft.FontWeight.W_500)
+                ft.Text(
+                    f"Select test lab numbers for {sap_code} (from your previous selection):",
+                    size=12,
+                    color=self.theme_color('text_muted', 'grey'),
+                    weight=ft.FontWeight.W_500
+                )
             )
             
             # Add Select All / Select None buttons
@@ -305,14 +338,16 @@ class ConfigTab(BaseTab):
                 icon=ft.Icons.SELECT_ALL,
                 on_click=lambda e: self._select_all_test_labs(sap_code),
                 scale=0.8,
-                bgcolor="#e3f2fd"
+                bgcolor=self.theme_color('primary_container', '#e3f2fd'),
+                color=self.theme_color('on_primary_container', '#0d1a2b')
             )
             select_none_btn = ft.ElevatedButton(
                 "Select None", 
                 icon=ft.Icons.DESELECT,
                 on_click=lambda e: self._select_none_test_labs(sap_code),
                 scale=0.8,
-                bgcolor="#f5f5f5"
+                bgcolor=self.theme_color('surface_variant', '#f5f5f5'),
+                color=self.theme_color('on_surface_variant', '#1f2933')
             )
             
             test_lab_checkboxes.append(
@@ -346,11 +381,23 @@ class ConfigTab(BaseTab):
                         checkbox,
                         ft.Container(
                             content=ft.Column([
-                                ft.Text(f"Test: {test.test_lab_number}", size=12, weight=ft.FontWeight.W_500, color="blue"),
+                                ft.Text(
+                                    f"Test: {test.test_lab_number}",
+                                    size=12,
+                                    weight=ft.FontWeight.W_500,
+                                    color=self.theme_color('primary', 'blue')
+                                ),
                                 ft.Row([
-                                    ft.Text(f"Voltage: {voltage_display}", size=11, color="darkgreen"),
-                                    ft.Text("•", size=11, color="grey"),
-                                    ft.Text(f"Notes: {notes_display}", size=11, color="grey", 
+                                    ft.Text(
+                                        f"Voltage: {voltage_display}",
+                                        size=11,
+                                        color=self.theme_color('success', 'darkgreen')
+                                    ),
+                                    ft.Text("•", size=11, color=self.theme_color('text_muted', 'grey')),
+                                    ft.Text(
+                                        f"Notes: {notes_display}",
+                                        size=11,
+                                        color=self.theme_color('text_muted', 'grey'), 
                                            tooltip=test.notes if test.notes else "No notes available")
                                 ], spacing=5)
                             ], spacing=2),
@@ -367,7 +414,11 @@ class ConfigTab(BaseTab):
                 test_lab_checkboxes.append(test_info_row)
         else:
             test_lab_checkboxes.append(
-                ft.Text("No test lab numbers were selected for this SAP code in the previous step", size=12, color="orange")
+                ft.Text(
+                    "No test lab numbers were selected for this SAP code in the previous step",
+                    size=12,
+                    color=self.theme_color('warning', 'orange')
+                )
             )
         
         # Update the container content
@@ -430,6 +481,8 @@ class ConfigTab(BaseTab):
         """Update noise test checkboxes for a specific SAP code - Load full data only when user selects"""
         if not self.parent_gui or sap_code not in self.noise_test_lab_containers:
             return
+
+        color = self._color
             
         container = self.noise_test_lab_containers[sap_code]
         
@@ -437,7 +490,11 @@ class ConfigTab(BaseTab):
         container.content = ft.Column([
             ft.Row([
                 ft.ProgressRing(width=16, height=16, stroke_width=2),
-                ft.Text("Loading noise tests from registry...", size=12, color="grey")
+                ft.Text(
+                    "Loading noise tests from registry...",
+                    size=12,
+                    color=color('text_muted', 'grey')
+                )
             ], spacing=10)
         ])
         
@@ -461,10 +518,18 @@ class ConfigTab(BaseTab):
                     # SAP code not found in noise registry
                     def update_no_tests():
                         container.content = ft.Column([
-                            ft.Text(f"SAP code {sap_code} not found in noise registry", 
-                                   size=12, color="orange", weight=ft.FontWeight.W_500),
-                            ft.Text("This SAP code is not available for noise testing", 
-                                   size=11, color="grey", italic=True)
+                            ft.Text(
+                                f"SAP code {sap_code} not found in noise registry",
+                                size=12,
+                                color=color('warning', 'orange'),
+                                weight=ft.FontWeight.W_500
+                            ),
+                            ft.Text(
+                                "This SAP code is not available for noise testing",
+                                size=11,
+                                color=color('text_muted', 'grey'),
+                                italic=True
+                            )
                         ], spacing=5)
                         if self.parent_gui:
                             self.parent_gui._safe_page_update()
@@ -487,7 +552,7 @@ class ConfigTab(BaseTab):
                         test_count = len(sap_noise_tests)
                         noise_test_checkboxes.append(
                             ft.Text(f"Found {test_count} noise test{'s' if test_count != 1 else ''} for {sap_code}", 
-                                   size=14, color="darkgreen", weight=ft.FontWeight.BOLD)
+                                   size=14, color=color('success', 'darkgreen'), weight=ft.FontWeight.BOLD)
                         )
                         
                         # Add Select All / Select None buttons
@@ -497,14 +562,14 @@ class ConfigTab(BaseTab):
                                 icon=ft.Icons.SELECT_ALL,
                                 on_click=lambda e: self._select_all_noise_tests(sap_code),
                                 scale=0.8,
-                                bgcolor="#e8f5e8"
+                                bgcolor=color('success_container', '#e8f5e8')
                             ),
                             ft.ElevatedButton(
                                 "Select None", 
                                 icon=ft.Icons.DESELECT,
                                 on_click=lambda e: self._select_none_noise_tests(sap_code),
                                 scale=0.8,
-                                bgcolor="#f5f5f5"
+                                bgcolor=color('surface_variant', '#f5f5f5')
                             )
                         ], spacing=5)
                         
@@ -571,21 +636,39 @@ class ConfigTab(BaseTab):
                                         content=ft.Column([
                                             ft.Row([
                                                 ft.Text(icon, size=16),  # Visual indicator icon
-                                                ft.Text(f"Test: {test_display}", size=12, weight=ft.FontWeight.W_500, color="blue"),
+                                                ft.Text(
+                                                    f"Test: {test_display}",
+                                                    size=12,
+                                                    weight=ft.FontWeight.W_500,
+                                                    color=color('primary', 'blue')
+                                                ),
                                             ], spacing=5),
-                                            ft.Text(data_availability, size=11, color=icon_color, weight=ft.FontWeight.W_500),  # Data availability
-                                            ft.Text(details_str, size=11, color="grey"),
-                                            ft.Text(f"Notes: {test.notes if test.notes and test.notes.strip() else 'No notes'}", 
-                                                   size=10, color="darkgrey", italic=True)
+                                            ft.Text(
+                                                data_availability,
+                                                size=11,
+                                                color=icon_color,
+                                                weight=ft.FontWeight.W_500
+                                            ),  # Data availability
+                                            ft.Text(
+                                                details_str,
+                                                size=11,
+                                                color=color('text_muted', 'grey')
+                                            ),
+                                            ft.Text(
+                                                f"Notes: {test.notes if test.notes and test.notes.strip() else 'No notes'}",
+                                                size=10,
+                                                color=color('text_muted', 'darkgrey'),
+                                                italic=True
+                                            )
                                         ], spacing=2),
                                         expand=True
                                     )
                                 ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START),
                                 padding=ft.padding.symmetric(horizontal=5, vertical=5),
                                 margin=ft.margin.only(bottom=5),
-                                bgcolor="#f8f9fa" if is_test_selected else None,
+                                bgcolor=color('surface_variant', '#f8f9fa') if is_test_selected else None,
                                 border_radius=5,
-                                border=ft.border.all(1, "#007bff") if is_test_selected else ft.border.all(1, "#e9ecef")
+                                border=ft.border.all(1, color('primary', '#007bff')) if is_test_selected else ft.border.all(1, color('surface_variant', '#e9ecef'))
                             )
                             
                             noise_test_checkboxes.append(test_info_row)
@@ -593,7 +676,7 @@ class ConfigTab(BaseTab):
                         # No tests found for this SAP (should not happen if pre-check passed)
                         noise_test_checkboxes.append(
                             ft.Text(f"No noise tests found for {sap_code} in registry", 
-                                   size=12, color="orange", italic=True)
+                                   size=12, color=color('warning', 'orange'), italic=True)
                         )
                     
                     # Update container with test checkboxes
@@ -607,7 +690,11 @@ class ConfigTab(BaseTab):
                 logger.error(f"Error loading noise tests for {sap_code}: {e}")
                 def update_error():
                     container.content = ft.Column([
-                        ft.Text(f"Error loading noise tests: {str(e)}", size=12, color="red")
+                        ft.Text(
+                            f"Error loading noise tests: {str(e)}",
+                            size=12,
+                            color=color('error', 'red')
+                        )
                     ])
                     if self.parent_gui:
                         self.parent_gui._safe_page_update()
@@ -795,6 +882,8 @@ class ConfigTab(BaseTab):
             logger.warning(f"⚠️ Cannot load LF tests - parent_gui={bool(self.parent_gui)}, container_exists={sap_code in self.lf_test_containers if hasattr(self, 'lf_test_containers') else False}")
             return
         
+        color = self._color
+
         try:
             # Get LF registry reader
             from ...services.lf_registry_reader import LifeTestRegistryReader
@@ -808,7 +897,12 @@ class ConfigTab(BaseTab):
             if not lf_tests:
                 # Show message if no tests found
                 self.lf_test_containers[sap_code].content = ft.Column([
-                    ft.Text("No LF tests found for this SAP code", color="grey", italic=True, size=12)
+                    ft.Text(
+                        "No LF tests found for this SAP code",
+                        color=color('text_muted', 'grey'),
+                        italic=True,
+                        size=12
+                    )
                 ])
                 self.parent_gui._safe_page_update()
                 return
@@ -850,7 +944,11 @@ class ConfigTab(BaseTab):
         except Exception as e:
             logger.error(f"Error loading LF tests for {sap_code}: {e}")
             self.lf_test_containers[sap_code].content = ft.Column([
-                ft.Text(f"Error loading LF tests: {str(e)}", color="red", size=12)
+                ft.Text(
+                    f"Error loading LF tests: {str(e)}",
+                    color=color('error', 'red'),
+                    size=12
+                )
             ])
             self.parent_gui._safe_page_update()
     
@@ -1099,10 +1197,10 @@ class ConfigTab(BaseTab):
                     content=ft.Column([]),
                     visible=(sap in self.parent_gui.state_manager.state.selected_comparison_saps if hasattr(self.parent_gui.state_manager, 'state') else False),
                     margin=ft.margin.only(left=30, top=5, bottom=10),
-                    bgcolor="#f8f9fa",
+                    bgcolor=self.theme_color('surface_variant', '#f8f9fa'),
                     padding=ft.padding.all(10),
                     border_radius=5,
-                    border=ft.border.all(1, "#e9ecef")
+                    border=ft.border.all(1, self.theme_color('outline', '#e9ecef'))
                 )
                 self.comparison_test_lab_containers[sap] = test_lab_container
             else:
@@ -1184,10 +1282,10 @@ class ConfigTab(BaseTab):
                     content=ft.Column([]),
                     visible=(sap in self.parent_gui.state_manager.state.selected_noise_saps if hasattr(self.parent_gui.state_manager, 'state') else False),
                     margin=ft.margin.only(left=30, top=5, bottom=10),
-                    bgcolor="#e8f5e8",  # Light green background for noise
+                    bgcolor=self.theme_color('success_container', '#e8f5e8'),  # Light green background for noise
                     padding=ft.padding.all(10),
                     border_radius=5,
-                    border=ft.border.all(1, "#c8e6c9")
+                    border=ft.border.all(1, self.theme_color('success', '#2e7d32'))
                 )
                 self.noise_test_lab_containers[sap] = noise_test_container
             else:
@@ -1328,13 +1426,18 @@ class ConfigTab(BaseTab):
             return
             
         container = self.noise_test_lab_containers[sap_code]
+        color = self._color
         
         # Show loading briefly
         temp_content = container.content
         container.content = ft.Column([
             ft.Row([
                 ft.ProgressRing(width=16, height=16, stroke_width=2),
-                ft.Text("Loading more tests...", size=12, color="grey")
+                ft.Text(
+                    "Loading more tests...",
+                    size=12,
+                    color=color('text_muted', 'grey')
+                )
             ], spacing=10)
         ])
         if self.parent_gui and hasattr(self.parent_gui, '_safe_page_update'):
@@ -1358,7 +1461,12 @@ class ConfigTab(BaseTab):
             
             # Add header
             all_checkboxes.append(
-                ft.Text(f"All {len(sap_noise_tests)} noise tests for {sap_code}:", size=14, color="darkgreen", weight=ft.FontWeight.BOLD)
+                ft.Text(
+                    f"All {len(sap_noise_tests)} noise tests for {sap_code}:",
+                    size=14,
+                    color=color('success', 'darkgreen'),
+                    weight=ft.FontWeight.BOLD
+                )
             )
             
             # Add control buttons
@@ -1367,14 +1475,14 @@ class ConfigTab(BaseTab):
                 icon=ft.Icons.SELECT_ALL,
                 on_click=lambda e: self._select_all_noise_tests(sap_code),
                 scale=0.8,
-                bgcolor="#e8f5e8"
+                bgcolor=color('success_container', '#e8f5e8')
             )
             select_none_btn = ft.ElevatedButton(
                 "Select None", 
                 icon=ft.Icons.DESELECT,
                 on_click=lambda e: self._select_none_noise_tests(sap_code),
                 scale=0.8,
-                bgcolor="#f5f5f5"
+                bgcolor=color('surface_variant', '#f5f5f5')
             )
             
             all_checkboxes.append(
@@ -1494,6 +1602,7 @@ class ConfigTab(BaseTab):
         Discover what data files exist for a noise test.
         Returns: (data_type, image_count, txt_count, icon, color)
         """
+        color = self._color
         try:
             # Extract year from date
             import pandas as pd
@@ -1509,7 +1618,7 @@ class ConfigTab(BaseTab):
             
             if not year:
                 logger.debug(f"No year extracted from date {date_str} for test {test_no}")
-                return ("unknown", 0, 0, "❓", "grey")
+                return ("unknown", 0, 0, "❓", color('text_muted', 'grey'))
             
             # Get noise handler - prefer existing one from app
             noise_handler = None
@@ -1522,14 +1631,14 @@ class ConfigTab(BaseTab):
                 # Need to create temporary handler - check if noise folder is available
                 if not hasattr(self.parent_gui, 'state_manager') or not self.parent_gui.state_manager:
                     logger.debug(f"No state_manager available for test {test_no}")
-                    return ("unknown", 0, 0, "❓", "grey")
+                    return ("unknown", 0, 0, "❓", color('text_muted', 'grey'))
                 
                 state = self.parent_gui.state_manager.state
                 noise_folder = getattr(state, 'selected_noise_folder', None)
                 
                 if not noise_folder:
                     logger.debug(f"No noise folder selected for test {test_no}")
-                    return ("unknown", 0, 0, "❓", "grey")
+                    return ("unknown", 0, 0, "❓", color('text_muted', 'grey'))
                 
                 # Create temporary handler with registry if available
                 from ...simplified_noise_handler import SimplifiedNoiseDataHandler
@@ -1560,19 +1669,19 @@ class ConfigTab(BaseTab):
                 
                 # Determine icon and color based on data type
                 if data_type == "txt_data":
-                    return (data_type, image_count, txt_count, "📊", "green")
+                    return (data_type, image_count, txt_count, "📊", color('success', 'green'))
                 elif data_type == "images":
-                    return (data_type, image_count, txt_count, "🖼️", "green")
+                    return (data_type, image_count, txt_count, "🖼️", color('success', 'green'))
                 elif txt_count > 0 and image_count > 0:
-                    return ("both", image_count, txt_count, "📊🖼️", "blue")
+                    return ("both", image_count, txt_count, "📊🖼️", color('primary', 'blue'))
                 else:
-                    return (data_type, image_count, txt_count, "⚠️", "orange")
-            
-            return ("none", 0, 0, "⚠️", "orange")
-            
+                    return (data_type, image_count, txt_count, "⚠️", color('warning', 'orange'))
+
+            return ("none", 0, 0, "⚠️", color('warning', 'orange'))
+
         except Exception as e:
             logger.debug(f"Could not discover data for test {test_no}: {e}")
-            return ("unknown", 0, 0, "❓", "grey")
+            return ("unknown", 0, 0, "❓", color('text_muted', 'grey'))
     
     def _add_new_comparison_group(self, e):
         """Add a new comparison group"""
@@ -1633,6 +1742,7 @@ class ConfigTab(BaseTab):
         # Create SAP sections for this comparison group
         sap_sections = []
         group_sap_containers = {}
+        color = self._color
         
         for sap in available_sap_codes:
             # Get selected tests count for this SAP
@@ -1662,10 +1772,10 @@ class ConfigTab(BaseTab):
                 content=ft.Column([]),
                 visible=False,
                 margin=ft.margin.only(left=30, top=5, bottom=10),
-                bgcolor="#f8f9fa",
+                bgcolor=color('surface_variant', '#f8f9fa'),
                 padding=ft.padding.all(10),
                 border_radius=5,
-                border=ft.border.all(1, "#e9ecef")
+                border=ft.border.all(1, color('outline', '#e9ecef'))
             )
             
             group_sap_containers[sap] = test_lab_container
@@ -1693,18 +1803,23 @@ class ConfigTab(BaseTab):
             content=ft.Column([
                 # Header with title and delete button
                 ft.Row([
-                    ft.Text(f"Comparison {group_number}", size=16, weight=ft.FontWeight.BOLD, color="#fbc02d"),
+                    ft.Text(
+                        f"Comparison {group_number}",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        color=color('warning', '#fbc02d')
+                    ),
                     ft.Container(expand=True),
                     ft.IconButton(
                         icon=ft.Icons.DELETE,
-                        icon_color="red",
+                        icon_color=color('error', 'red'),
                         tooltip=f"Delete Comparison {group_number}",
                         on_click=lambda e, grp_id=group_id: self._delete_comparison_group(grp_id)
                     )
                 ], spacing=10),
                 
                 ft.Text("Select SAP codes and test labs for this comparison. At least 2 test labs must be selected.", 
-                       color="grey", size=12),
+                       color=color('text_muted', 'grey'), size=12),
                 
                 # SAP sections
                 ft.Column(sap_sections, spacing=5),
@@ -1718,9 +1833,9 @@ class ConfigTab(BaseTab):
             ], spacing=10),
             padding=ft.padding.all(15),
             margin=ft.margin.only(bottom=15),
-            bgcolor="#fff8e1",
+            bgcolor=color('warning_container', '#fff8e1'),
             border_radius=8,
-            border=ft.border.all(1, "#ffcc02"),
+            border=ft.border.all(1, color('warning', '#ffcc02')),
             data=group_id
         )
         
@@ -1777,6 +1892,7 @@ class ConfigTab(BaseTab):
             return
         
         logger.debug(f"Updating test labs for group {group_id}, SAP {sap_code}")
+        color = self._color
         
         # Find the group
         group_info = None
@@ -1809,7 +1925,12 @@ class ConfigTab(BaseTab):
         test_lab_checkboxes = []
         if selected_tests_from_step2:
             test_lab_checkboxes.append(
-                ft.Text(f"Select test labs for {sap_code} in this comparison:", size=12, color="grey", weight=ft.FontWeight.W_500)
+                ft.Text(
+                    f"Select test labs for {sap_code} in this comparison:",
+                    size=12,
+                    color=color('text_muted', 'grey'),
+                    weight=ft.FontWeight.W_500
+                )
             )
             
             # Add Select All / Select None buttons for this group
@@ -1818,14 +1939,14 @@ class ConfigTab(BaseTab):
                 icon=ft.Icons.SELECT_ALL,
                 on_click=lambda e, grp_id=group_id, sap=sap_code: self._select_all_group_test_labs(grp_id, sap),
                 scale=0.8,
-                bgcolor="#e3f2fd"
+                bgcolor=color('primary_container', '#e3f2fd')
             )
             select_none_btn = ft.ElevatedButton(
                 "Select None", 
                 icon=ft.Icons.DESELECT,
                 on_click=lambda e, grp_id=group_id, sap=sap_code: self._select_none_group_test_labs(grp_id, sap),
                 scale=0.8,
-                bgcolor="#f5f5f5"
+                bgcolor=color('surface_variant', '#f5f5f5')
             )
             
             test_lab_checkboxes.append(
@@ -1859,12 +1980,25 @@ class ConfigTab(BaseTab):
                         checkbox,
                         ft.Container(
                             content=ft.Column([
-                                ft.Text(f"Test: {test.test_lab_number}", size=12, weight=ft.FontWeight.W_500, color="blue"),
+                                ft.Text(
+                                    f"Test: {test.test_lab_number}",
+                                    size=12,
+                                    weight=ft.FontWeight.W_500,
+                                    color=color('primary', 'blue')
+                                ),
                                 ft.Row([
-                                    ft.Text(f"Voltage: {voltage_display}", size=11, color="darkgreen"),
-                                    ft.Text("•", size=11, color="grey"),
-                                    ft.Text(f"Notes: {notes_display}", size=11, color="grey", 
-                                           tooltip=test.notes if test.notes else "No notes available")
+                                    ft.Text(
+                                        f"Voltage: {voltage_display}",
+                                        size=11,
+                                        color=color('success', 'darkgreen')
+                                    ),
+                                    ft.Text("•", size=11, color=color('text_muted', 'grey')),
+                                    ft.Text(
+                                        f"Notes: {notes_display}",
+                                        size=11,
+                                        color=color('text_muted', 'grey'),
+                                        tooltip=test.notes if test.notes else "No notes available"
+                                    )
                                 ], spacing=5)
                             ], spacing=2),
                             expand=True
@@ -1872,15 +2006,19 @@ class ConfigTab(BaseTab):
                     ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START),
                     padding=ft.padding.symmetric(horizontal=5, vertical=3),
                     margin=ft.margin.only(bottom=3),
-                    bgcolor="#f8f9fa" if is_test_lab_selected else None,
+                    bgcolor=color('surface_variant', '#f8f9fa') if is_test_lab_selected else None,
                     border_radius=3,
-                    border=ft.border.all(1, "#007bff") if is_test_lab_selected else ft.border.all(1, "#e9ecef")
+                    border=ft.border.all(1, color('primary', '#007bff')) if is_test_lab_selected else ft.border.all(1, color('outline', '#e9ecef'))
                 )
                 
                 test_lab_checkboxes.append(test_info_row)
         else:
             test_lab_checkboxes.append(
-                ft.Text("No test labs available for this SAP", size=12, color="orange")
+                ft.Text(
+                    "No test labs available for this SAP",
+                    size=12,
+                    color=color('warning', 'orange')
+                )
             )
         
         container.content = ft.Column(test_lab_checkboxes, spacing=2)
@@ -1970,6 +2108,7 @@ class ConfigTab(BaseTab):
             not hasattr(self.parent_gui.state_manager, 'state') or
             not hasattr(self.parent_gui.state_manager.state, 'comparison_groups')):
             return
+        color = self._color
         
         # Count total selected test labs in this group
         total_test_labs = 0
@@ -1997,17 +2136,21 @@ class ConfigTab(BaseTab):
                 if total_test_labs < 2:
                     validation_container.content = ft.Text(
                         f"⚠️ At least 2 test labs required for comparison (currently {total_test_labs} selected)",
-                        size=12, color="orange", weight=ft.FontWeight.W_500
+                        size=12,
+                        color=color('warning', 'orange'),
+                        weight=ft.FontWeight.W_500
                     )
-                    validation_container.bgcolor = "#fff3e0"
+                    validation_container.bgcolor = color('warning_container', '#fff3e0')
                     validation_container.padding = ft.padding.all(8)
                     validation_container.border_radius = 4
                 else:
                     validation_container.content = ft.Text(
                         f"✅ Valid comparison with {total_test_labs} test labs selected",
-                        size=12, color="green", weight=ft.FontWeight.W_500
+                        size=12,
+                        color=color('success', 'green'),
+                        weight=ft.FontWeight.W_500
                     )
-                    validation_container.bgcolor = "#e8f5e8"
+                    validation_container.bgcolor = color('success_container', '#e8f5e8')
                     validation_container.padding = ft.padding.all(8)
                     validation_container.border_radius = 4
                 

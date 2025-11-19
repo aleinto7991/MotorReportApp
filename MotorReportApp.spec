@@ -4,7 +4,7 @@ import os
 try:
     from src._version import VERSION
 except Exception:
-    VERSION = "3.1.0"
+    VERSION = "3.1.3"
 
 datas = []
 binaries = []

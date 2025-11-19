@@ -6,6 +6,11 @@ import logging
 from typing import Dict, Any, Optional, Callable
 from abc import ABC, abstractmethod
 
+try:
+    from ..theme import resolve_token
+except Exception:  # pragma: no cover - fallback when theme not available
+    resolve_token = lambda page, token, fallback=None: fallback  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +42,17 @@ class BaseComponent(ABC):
                 self.parent_gui.page.update()
             except Exception as e:
                 logger.warning(f"Failed to update page: {e}")
+
+    # Shared theme helpers -------------------------------------------------
+    def theme_color(self, token: str, fallback: str) -> str:
+        """Resolve a semantic theme color with graceful fallback."""
+        try:
+            if self.parent_gui and hasattr(self.parent_gui, '_themed_color'):
+                return self.parent_gui._themed_color(token, fallback)
+            page = getattr(self.parent_gui, 'page', None) if self.parent_gui else None
+            return resolve_token(page, token, fallback) or fallback
+        except Exception:
+            return fallback
 
 
 class BaseTab(BaseComponent):

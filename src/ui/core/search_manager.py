@@ -5,7 +5,7 @@ Handles search operations and results display with performance optimizations.
 import flet as ft
 import logging
 import threading
-from typing import List, Dict, Optional, TYPE_CHECKING, Any
+from typing import List, Dict, Optional, TYPE_CHECKING, Any, Callable
 from ...data.models import Test
 from ..utils.pagination import Paginator
 
@@ -316,7 +316,10 @@ class SearchResultsBuilder:
         if not display_tests:
             gui.results_area.controls.append(
                 ft.Container(
-                    content=ft.Text("No tests available for the current SAP selection.", color="grey"),
+                    content=ft.Text(
+                        "No tests available for the current SAP selection.",
+                        color=self._color('text_muted', 'grey')
+                    ),
                     alignment=ft.alignment.center,
                     padding=20
                 )
@@ -349,8 +352,9 @@ class SearchResultsBuilder:
                         )
                     ),
                     padding=ft.padding.symmetric(vertical=10),
-                    bgcolor="#fafafa",
-                    border_radius=8
+                    bgcolor=self._color('surface_variant', '#fafafa'),
+                    border_radius=8,
+                    border=ft.border.all(1, self._color('outline', '#e0e0e0'))
                 )
             )
         
@@ -373,8 +377,9 @@ class SearchResultsBuilder:
                         )
                     ),
                     padding=ft.padding.symmetric(vertical=10),
-                    bgcolor="#fafafa",
+                    bgcolor=self._color('surface_variant', '#fafafa'),
                     border_radius=8,
+                    border=ft.border.all(1, self._color('outline', '#e0e0e0')),
                     margin=ft.margin.only(top=10)
                 )
             )
@@ -442,8 +447,9 @@ class SearchResultsBuilder:
                         )
                     ),
                     padding=ft.padding.symmetric(vertical=10),
-                    bgcolor="#fafafa",
+                    bgcolor=self._color('surface_variant', '#fafafa'),
                     border_radius=8,
+                    border=ft.border.all(1, self._color('outline', '#e0e0e0')),
                     margin=ft.margin.only(top=10)
                 )
             )
@@ -523,41 +529,50 @@ class SearchResultsBuilder:
         )
         return ft.Container(
             content=ft.Row([
-                ft.Icon(ft.Icons.LIST_ALT, color=gui._themed_color('primary', 'blue')),
+                ft.Icon(ft.Icons.LIST_ALT, color=self._color('primary', 'blue')),
                 ft.Text(f"Found {total_tests} test(s){filter_note}", size=16, weight=ft.FontWeight.W_500),
-                ft.Text(sap_note, size=12, color=gui._themed_color('on_surface', 'grey')),
+                ft.Text(sap_note, size=12, color=self._color('text_muted', 'grey')),
                 ft.Container(expand=True),
                 ft.Text(
                     f"Selected: {selected_count}",
                     size=12,
-                    color=(gui._themed_color('primary', 'green') if selected_count > 0 else gui._themed_color('on_surface', 'grey'))
+                    color=(self._color('primary', 'green') if selected_count > 0 else self._color('text_muted', 'grey'))
                 )
             ], spacing=10),
             padding=ft.padding.symmetric(vertical=6, horizontal=10),
-            bgcolor=gui._themed_color('surface', '#eef5ff'),
+            bgcolor=self._color('surface', '#eef5ff'),
             border_radius=6,
             margin=ft.margin.only(bottom=8)
         )
 
     def _build_column_headers(self) -> ft.Control:
+        header_color = self._color('on_surface_variant', '#0f172a')
         return ft.Container(
             content=ft.Row([
                 ft.Container(width=40),
-                ft.Container(ft.Text("Test Lab", size=11, weight=ft.FontWeight.W_500, color=ft.Colors.BLUE_900), width=110),
-                ft.Container(ft.Text("Date", size=11, weight=ft.FontWeight.W_500, color=ft.Colors.BLUE_900), width=130),
-                ft.Container(ft.Text("Voltage", size=11, weight=ft.FontWeight.W_500, color=ft.Colors.BLUE_900), width=90),
-                ft.Container(ft.Text("Notes", size=11, weight=ft.FontWeight.W_500, color=ft.Colors.BLUE_900), expand=True),
+                ft.Container(ft.Text("Test Lab", size=11, weight=ft.FontWeight.W_500, color=header_color), width=110),
+                ft.Container(ft.Text("Date", size=11, weight=ft.FontWeight.W_500, color=header_color), width=130),
+                ft.Container(ft.Text("Voltage", size=11, weight=ft.FontWeight.W_500, color=header_color), width=90),
+                ft.Container(ft.Text("Notes", size=11, weight=ft.FontWeight.W_500, color=header_color), expand=True),
                 ft.Container(width=40)
             ]),
-            bgcolor=self.gui._themed_color('surface', '#f5f9ff'),
+            bgcolor=self._color('surface_variant', '#f5f9ff'),
             padding=ft.padding.symmetric(horizontal=12, vertical=6),
             border_radius=6,
             margin=ft.margin.only(bottom=4),
-            border=ft.border.all(1, self.gui._themed_color('outline', '#d0d7e5'))
+            border=ft.border.all(1, self._color('outline', '#d0d7e5'))
         )
 
     def _build_test_row(self, test, index: int) -> ft.Control:
-        bg_color = self.gui._themed_color('surface', '#ffffff') if index % 2 == 0 else self.gui._themed_color('surface_variant', '#f8f8f8')
+        base_bg = self._color('surface', '#ffffff')
+        alt_bg = self._color('surface_variant', '#f8f8f8')
+        bg_color = base_bg if index % 2 == 0 else alt_bg
+        border_color = self._color('outline', '#e0e0e0')
+        selected_border = self._color('primary', '#1d4ed8')
+        lab_color = self._color('on_surface', '#111827')
+        date_success = self._color('success', 'darkgreen')
+        date_muted = self._color('text_muted', 'grey')
+        meta_color = self._color('text_muted', '#475467')
         selected_tests = getattr(self.gui.state_manager.state, 'selected_tests', {})
         is_selected = test.test_lab_number in selected_tests
 
@@ -574,13 +589,32 @@ class SearchResultsBuilder:
                     data=test,
                     on_change=self.gui.event_handlers.on_test_selected if hasattr(self.gui, 'event_handlers') else None
                 ),
-                ft.Container(ft.Text(test.test_lab_number, size=12, weight=ft.FontWeight.W_500), width=110),
-                ft.Container(ft.Text(date_text, size=12, color="darkgreen" if date_text != "N/A" else "grey"), width=130),
-                ft.Container(ft.Text(f"{test.voltage}V" if getattr(test, 'voltage', None) else "N/A", size=12), width=90),
+                ft.Container(
+                    ft.Text(test.test_lab_number, size=12, weight=ft.FontWeight.W_500, color=lab_color),
+                    width=110
+                ),
+                ft.Container(
+                    ft.Text(
+                        date_text,
+                        size=12,
+                        color=date_success if date_text != "N/A" else date_muted,
+                        weight=ft.FontWeight.W_500 if date_text != "N/A" else ft.FontWeight.NORMAL
+                    ),
+                    width=130
+                ),
+                ft.Container(
+                    ft.Text(
+                        f"{test.voltage}V" if getattr(test, 'voltage', None) else "N/A",
+                        size=12,
+                        color=lab_color
+                    ),
+                    width=90
+                ),
                 ft.Container(
                     ft.Text(
                         (test.notes or "No notes"),
                         size=11,
+                        color=meta_color,
                         tooltip=test.notes or "No notes",
                         max_lines=2,
                         overflow=ft.TextOverflow.ELLIPSIS
@@ -590,16 +624,30 @@ class SearchResultsBuilder:
                 ft.IconButton(
                     icon=ft.Icons.INFO_OUTLINE,
                     tooltip="Test details",
+                    icon_color=self._color('primary', '#2563eb'),
                     on_click=(lambda e, t=test: self.gui._show_test_details(t)) if hasattr(self.gui, '_show_test_details') else None
                 )
             ], alignment=ft.MainAxisAlignment.START),
             padding=ft.padding.symmetric(horizontal=12, vertical=6),
             bgcolor=bg_color,
-            border=ft.border.all(1, (self.gui._themed_color('outline', '#e0e0e0') if not is_selected else self.gui._themed_color('primary', 'green'))),
+            border=ft.border.all(1, selected_border if is_selected else border_color),
             border_radius=6,
             margin=ft.margin.only(bottom=4),
             on_click=row_click_handler if row_click_handler else None
         )
+
+    def _color(self, token: str, fallback: str) -> str:
+        """Helper to resolve semantic colors with graceful fallback."""
+
+        resolver: Optional[Callable[[str, str], Optional[str]]] = getattr(self.gui, "_themed_color", None)
+        if callable(resolver):
+            try:
+                resolved = resolver(token, fallback)
+                if resolved:
+                    return resolved
+            except Exception as exc:
+                logger.debug("SearchResultsBuilder color fallback (%s): %s", token, exc)
+        return fallback
 
     def _update_selection_indicator(self):
         if hasattr(self.gui, 'selected_count_text') and self.gui.selected_count_text:

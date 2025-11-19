@@ -74,6 +74,7 @@ class TestLabSummary:
     collaudo_media: Optional[CollaudoSummary] = None
     matched_test_number: Optional[str] = None  # Candidate stem that matched during lookup
     match_strategy: str = "exact"  # How the workbook was resolved (exact, prefix, fallback_*)
+    raw_sheets: List[Dict] = field(default_factory=list)  # List of raw sheet data (name, values, merges, col_widths)
 
 
 @dataclass

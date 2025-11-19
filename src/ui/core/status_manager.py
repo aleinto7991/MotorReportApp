@@ -33,8 +33,14 @@ class StatusManager:
         Callbacks are executed safely with proper error handling.
     """
     
-    def __init__(self, status_text: ft.Text, progress_bar: ft.ProgressBar, 
-                 update_callback: Optional[Callable] = None, progress_text: Optional[ft.Text] = None):
+    def __init__(
+        self,
+        status_text: ft.Text,
+        progress_bar: ft.ProgressBar,
+        update_callback: Optional[Callable] = None,
+        progress_text: Optional[ft.Text] = None,
+        color_resolver: Optional[Callable[[Optional[str]], Optional[str]]] = None,
+    ):
         """
         Initialize the status manager.
         
@@ -48,6 +54,7 @@ class StatusManager:
         self.progress_bar = progress_bar
         self.progress_text = progress_text
         self.update_callback = update_callback or (lambda: None)
+        self._color_resolver = color_resolver
     
     def update_status(self, message: str, color: str = 'black'):
         """
@@ -64,7 +71,7 @@ class StatusManager:
         """
         try:
             self.status_text.value = message
-            self.status_text.color = color
+            self.status_text.color = self._resolve_color(color)
             logger.info(f"GUI Status Update: {message}")
             
             # Safe callback execution
@@ -78,6 +85,16 @@ class StatusManager:
                         logger.warning(f"Status update callback failed: {e}")
         except Exception as e:
             logger.warning(f"Failed to update status: {e}")
+
+    def _resolve_color(self, color: Optional[str]) -> Optional[str]:
+        if callable(self._color_resolver):
+            try:
+                resolved = self._color_resolver(color)
+                if resolved:
+                    return resolved
+            except Exception:
+                pass
+        return color
     
     def show_progress(self, message: str = ""):
         """

@@ -54,6 +54,9 @@ class AppConfig:
     
     # Life Test (LF) selections (SAP code -> Set of test numbers)
     selected_lf_test_numbers: Dict[str, Set[str]] = field(default_factory=dict)
+
+    # Carichi/TestLab selections (Test Number -> File Path)
+    selected_carichi_map: Dict[str, str] = field(default_factory=dict)
     
     # Multiple comparison groups for custom comparison sheets
     multiple_comparisons: List = field(default_factory=list)  # List of comparison group definitions

@@ -31,6 +31,17 @@ class _WorkbookExtractionResult:
     collaudo: Optional[CollaudoSummary]
 
 
+@dataclass(frozen=True)
+class TestLabWorkbookMatch:
+    """Describe a workbook located within the Test-Lab hierarchy."""
+
+    requested_test_number: str
+    matched_test_number: str
+    match_strategy: str
+    path: Path
+    year_folder: Optional[str]
+
+
 class TestLabSummaryLoader:
     """Locate and extract summary data from test-lab workbooks."""
 
@@ -106,32 +117,47 @@ class TestLabSummaryLoader:
         return bool(self.base_path and self.base_path.exists())
 
     # ------------------------------------------------------------------
-    def load_summary(self, test_number: str) -> Optional[TestLabSummary]:
+    def load_summary(self, test_number: str, override_path: Optional[str] = None) -> Optional[TestLabSummary]:
         """Return the extracted summary for *test_number* or ``None`` if not found."""
-        if not self.available:
-            self.logger.debug("Test lab base directory not configured; skipping lookup")
-            return None
+        workbook_path = None
+        matched_stem = test_number
+        match_strategy = "auto"
 
-        self.logger.debug(
-            "Starting summary lookup for test %s (base directory: %s)",
-            test_number,
-            self.base_path,
-        )
+        if override_path:
+            workbook_path = Path(override_path)
+            if not workbook_path.exists():
+                self.logger.warning("Override path provided but does not exist: %s", override_path)
+                return None
+            match_strategy = "manual_override"
+            self.logger.info("Using manual override for test %s: %s", test_number, workbook_path)
+        else:
+            if not self.available:
+                self.logger.debug("Test lab base directory not configured; skipping lookup")
+                return None
 
-        match = self._locate_workbook(test_number)
-        if not match:
-            self.logger.info("No test-lab workbook found for %s", test_number)
-            return None
+            self.logger.debug(
+                "Starting summary lookup for test %s (base directory: %s)",
+                test_number,
+                self.base_path,
+            )
 
-        workbook_path, matched_stem, match_strategy = match
+            match = self.locate_workbook(test_number)
+            if not match:
+                self.logger.info("No test-lab workbook found for %s", test_number)
+                return None
+
+            workbook_path = match.path
+            matched_stem = match.matched_test_number
+            match_strategy = match.match_strategy
 
         try:
             extraction = self._extract_from_workbook(workbook_path)
+            raw_sheets = self._extract_raw_sheets(workbook_path)
         except Exception as exc:  # pragma: no cover - guard against unexpected formats
             self.logger.warning("Failed to parse test-lab workbook %s: %s", workbook_path, exc)
             return None
 
-        if not extraction.scheda and not extraction.collaudo:
+        if not extraction.scheda and not extraction.collaudo and not raw_sheets:
             self.logger.info(
                 "Workbook %s does not contain expected Scheda/Collaudo summaries", workbook_path
             )
@@ -143,9 +169,30 @@ class TestLabSummaryLoader:
             collaudo_media=extraction.collaudo,
             matched_test_number=matched_stem,
             match_strategy=match_strategy,
+            raw_sheets=raw_sheets,
         )
 
     # ------------------------------------------------------------------
+    def locate_workbook(self, test_number: str) -> Optional[TestLabWorkbookMatch]:
+        """Return details about the workbook backing ``test_number`` if present."""
+        if not self.available:
+            self.logger.debug("Test lab base directory not configured; skipping lookup")
+            return None
+
+        match = self._locate_workbook(test_number)
+        if not match:
+            return None
+
+        workbook_path, matched_stem, match_strategy = match
+        year_folder = self._derive_year_folder(workbook_path)
+        return TestLabWorkbookMatch(
+            requested_test_number=test_number,
+            matched_test_number=matched_stem,
+            match_strategy=match_strategy,
+            path=workbook_path,
+            year_folder=year_folder,
+        )
+
     def _locate_workbook(self, test_number: str) -> Optional[Tuple[Path, str, str]]:
         assert self.base_path is not None  # guarded by available property
 
@@ -157,12 +204,13 @@ class TestLabSummaryLoader:
         primary_candidates: List[str] = [normalized]
         fallback_candidates: List[str] = []
 
-        if requested_is_alias:
-            base_candidate = normalized.rstrip("A")
-            if base_candidate:
-                fallback_candidates.append(base_candidate)
-        else:
-            fallback_candidates.append(f"{normalized}A")
+        # Strict matching requested: do not fallback to base or 'A' variant
+        # if requested_is_alias:
+        #     base_candidate = normalized.rstrip("A")
+        #     if base_candidate:
+        #         fallback_candidates.append(base_candidate)
+        # else:
+        #     fallback_candidates.append(f"{normalized}A")
 
         search_dirs = list(self._iter_search_directories())
 
@@ -179,12 +227,12 @@ class TestLabSummaryLoader:
             strategy = "fallback_prefix" if prefix_used else "fallback_exact"
             return path, candidate, strategy
 
-        if not primary_allow_prefix:
-            prefix_match = self._search_candidates(search_dirs, primary_candidates, allow_prefix=True)
-            if prefix_match:
-                path, candidate, prefix_used = prefix_match
-                strategy = "prefix" if prefix_used else "exact"
-                return path, candidate, strategy
+        # if not primary_allow_prefix:
+        #     prefix_match = self._search_candidates(search_dirs, primary_candidates, allow_prefix=True)
+        #     if prefix_match:
+        #         path, candidate, prefix_used = prefix_match
+        #         strategy = "prefix" if prefix_used else "exact"
+        #         return path, candidate, strategy
 
         evaluated = primary_candidates + fallback_candidates
         self.logger.info(
@@ -194,6 +242,18 @@ class TestLabSummaryLoader:
             len(search_dirs),
             evaluated,
         )
+        return None
+
+    def _derive_year_folder(self, workbook_path: Path) -> Optional[str]:
+        if not self.base_path:
+            return None
+        try:
+            relative_parent = workbook_path.parent.relative_to(self.base_path)
+        except ValueError:
+            return None
+        parts = relative_parent.parts
+        if parts:
+            return parts[0]
         return None
 
     def _search_candidates(
@@ -776,12 +836,12 @@ class TestLabSummaryLoader:
             Dict with 'scheda' and 'collaudo' lists of worksheets, or None if workbook not found
         """
         # Locate source workbook
-        location_result = self._locate_workbook(test_number)
+        location_result = self.locate_workbook(test_number)
         if not location_result:
             logger.warning(f"Could not locate workbook for test {test_number}")
             return None
         
-        source_path, _, _ = location_result
+        source_path = location_result.path
         
         # Convert .xls to .xlsx if needed
         if source_path.suffix.lower() == ".xls":
@@ -866,4 +926,68 @@ class TestLabSummaryLoader:
         # Copy merged cells
         for merged_range in source_sheet.merged_cells.ranges:
             target_sheet.merge_cells(str(merged_range))
+
+    # ------------------------------------------------------------------
+    def _extract_raw_sheets(self, workbook_path: Path) -> List[Dict[str, Any]]:
+        """Extract raw data from all relevant sheets (Scheda/Collaudo/Carichi)."""
+        self.logger.debug("Extracting raw sheets from %s", workbook_path)
+        
+        # Handle XLS conversion if needed
+        workbook_to_read = workbook_path
+        temp_converted_path = None
+        
+        if workbook_path.suffix.lower() == ".xls":
+            temp_converted_path = self._convert_xls_to_xlsx(workbook_path)
+            if temp_converted_path:
+                workbook_to_read = temp_converted_path
+            else:
+                return []
+
+        raw_sheets = []
+        wb = None
+        try:
+            # Load with data_only=True to get values, but we might miss formulas.
+            # For reporting, values are usually preferred.
+            wb = openpyxl.load_workbook(workbook_to_read, data_only=True)
+            
+            for sheet_name in wb.sheetnames:
+                normalized = self._normalize_text(sheet_name)
+                if any(k in normalized for k in ["scheda", "collaudo", "carichi"]):
+                    ws = wb[sheet_name]
+                    sheet_data = {
+                        "name": sheet_name,
+                        "values": [],
+                        "merges": [],
+                        "col_widths": {},
+                        "row_heights": {}
+                    }
+                    
+                    # Extract values
+                    for row in ws.iter_rows(values_only=True):
+                        sheet_data["values"].append(list(row))
+                        
+                    # Extract merges
+                    for merged_range in ws.merged_cells.ranges:
+                        sheet_data["merges"].append(str(merged_range))
+                        
+                    # Extract column widths
+                    for col_letter, col_dim in ws.column_dimensions.items():
+                        sheet_data["col_widths"][col_letter] = col_dim.width
+                        
+                    # Extract row heights
+                    for row_idx, row_dim in ws.row_dimensions.items():
+                        sheet_data["row_heights"][row_idx] = row_dim.height
+                        
+                    raw_sheets.append(sheet_data)
+                    self.logger.debug("Extracted raw sheet: %s", sheet_name)
+                    
+        except Exception as e:
+            self.logger.error("Error extracting raw sheets from %s: %s", workbook_path, e)
+        finally:
+            if wb:
+                wb.close()
+            if temp_converted_path and temp_converted_path.exists():
+                temp_converted_path.unlink(missing_ok=True)
+                
+        return raw_sheets
 
